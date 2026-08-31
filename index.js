@@ -7,7 +7,7 @@
 import { injectStyles } from './src/styles.js';
 import { initStorage, getStorageHealth } from './src/db.js';
 import { toast } from './src/utils.js';
-import { setupInjection } from './src/inject.js';
+import { setupInjection, clearRandomInjectCache } from './src/inject.js';
 import { state, fn } from './src/bridge.js';
 import { registerMainFn, preResolveActiveImages } from './src/ui-main.js';
 import { registerSheetsFn, createSheet, closeSheet, getAllTagSuggestions } from './src/ui-sheets.js';
@@ -21,6 +21,9 @@ registerSheetsFn();
 initBatchDeps(createSheet, closeSheet, getAllTagSuggestions);
 registerBatchFn();
 registerFabFn();
+
+// 随机注入切片刷新（悬浮球手动刷新入口）
+fn.refreshRandomSlice = clearRandomInjectCache;
 
 // ── 启动 ──────────────────────────────────────────────────
 // 样式可以先注入（不依赖数据）

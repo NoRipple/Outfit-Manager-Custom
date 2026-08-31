@@ -1131,7 +1131,12 @@ function openSettingsSheet() {
 
     sheet.querySelector('#om-mode').addEventListener('change', function () { var m = loadMeta(); m.mode = this.value; saveMeta(m); });
     sheet.querySelector('#om-inject-pos').addEventListener('change', function () { var m = loadMeta(); m.injectPosition = this.value; saveMeta(m); });
-    sheet.querySelector('#om-random-inject').addEventListener('change', function () { var m = loadMeta(); m.randomInject = this.checked; saveMeta(m); });
+    sheet.querySelector('#om-random-inject').addEventListener('change', function () {
+        var m = loadMeta(); m.randomInject = this.checked; saveMeta(m);
+        // 重建悬浮球以显示/隐藏刷新按钮
+        var oldFab = document.getElementById('om-fab-main'); if (oldFab && oldFab.parentNode) oldFab.parentNode.removeChild(oldFab);
+        if (m.showBall !== false && fn.injectFab) fn.injectFab();
+    });
     sheet.querySelector('#om-random-inject-count').addEventListener('change', function () {
         var m = loadMeta();
         var v = parseInt(this.value);
