@@ -485,8 +485,13 @@ export function setupInjection() {
     if (window.__omInjectionInstalled) return;
     window.__omInjectionInstalled = true;
 
-    registerCompletionEventInjection();
-    registerNewChatRefresh();
+    // 事件注册依赖动态 import('/script.js')，失败不应中断插件初始化
+    try {
+        registerCompletionEventInjection();
+    } catch (e) {}
+    try {
+        registerNewChatRefresh();
+    } catch (e) {}
 
     var origFetch = window.fetch;
     window.fetch = function (input, init) {
@@ -502,9 +507,13 @@ export function setupInjection() {
         } catch (e) {}
         return origFetch.apply(this, arguments);
     };
-    var origSend = XMLHttpRequest.prototype.send;
-    XMLHttpRequest.prototype.send = function (body) {
-        try { if (body && typeof body === 'string') { var nb = tryInjectBody(body); if (nb) return origSend.call(this, nb); } } catch (e) {}
-        return origSend.apply(this, arguments);
-    };
+
+    // XHR 拦截：部分宿主环境下 XMLHttpRequest 不可用，做防御判断，避免中断插件初始化
+    if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.prototype && typeof XMLHttpRequest.prototype.send === 'function') {
+        var origSend = XMLHttpRequest.prototype.send;
+        XMLHttpRequest.prototype.send = function (body) {
+            try { if (body && typeof body === 'string') { var nb = tryInjectBody(body); if (nb) return origSend.call(this, nb); } } catch (e) {}
+            return origSend.apply(this, arguments);
+        };
+    }
 }
