@@ -43,20 +43,14 @@ async function run() {
 
     const window = {
         __omCompletionEventInjectionInstalled: true,
-        __omNewChatRefreshInstalled: true,
         fetch: origFetch
     };
     class XHR { send() {} }
 
-    // 可控随机：randomSeq 顺序取值，取空后回退 0.5，保证切分结果可断言
-    const randomSeq = [];
-    const fakeMath = Object.create(Math);
-    fakeMath.random = () => (randomSeq.length ? randomSeq.shift() : 0.5);
-
     const context = vm.createContext({
         console,
         Promise,
-        Math: fakeMath,
+        Math,
         JSON,
         Object,
         Array,
@@ -66,7 +60,7 @@ async function run() {
         Date,
         Error,
         location: { href: 'https://st.local/', origin: 'https://st.local' },
-        SillyTavern: { getContext: () => ({ name2: 'Alice', chat: [] }) },
+        SillyTavern: { getContext: () => ({ name2: 'Alice' }) },
         window,
         XMLHttpRequest: XHR
     });
@@ -113,32 +107,20 @@ async function run() {
     const countBlocks = (s) => (s.match(/\[穿搭\d\]/g) || []).length;
     const descsIn = (s) => (['西装外套', '休闲T恤', '晚礼服', '运动服', '风衣'].filter((d) => s.indexOf(d) !== -1));
 
-    // 第 1 次注入：randomSeq=[0,0] → 确定抽到 [o1,o2]
-    randomSeq.length = 0; randomSeq.push(0, 0);
+    // 第 1 次注入：随机选取 randomInjectCount=2 套，生成缓存切片
     await window.fetch('https://st.local/api/chat', { method: 'POST', body });
     const first = capturedBody;
     assert.ok(first, 'first injection should produce a body');
     assert.equal(countBlocks(first), 2, 'first injection should pick exactly 2 outfits');
-    assert.ok(first.indexOf('西装外套') !== -1 && first.indexOf('休闲T恤') !== -1,
-        'deterministic first slice should be [o1,o2] (西装外套, 休闲T恤)');
+    assert.equal(descsIn(first).length, 2, 'first injection should contain exactly 2 distinct outfits');
 
-    // 第 2 次注入：缓存复用，内容应与第 1 次完全一致（不消费 randomSeq）
+    // 第 2 次注入：复用缓存，应产出与第 1 次完全一致的内容
     await window.fetch('https://st.local/api/chat', { method: 'POST', body });
     const second = capturedBody;
     assert.equal(second, first, 'subsequent injection must reuse the cached random slice');
 
-    // clearRandomInjectCache()：清空缓存 → 换 randomSeq 后重新随机 → 切片应变化
-    assert.equal(typeof mod.namespace.clearRandomInjectCache, 'function', 'clearRandomInjectCache should be exported');
-    mod.namespace.clearRandomInjectCache();
-    randomSeq.length = 0; randomSeq.push(0.99, 0.99);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
-    const refreshed = capturedBody;
-    assert.ok(refreshed !== first, 'after clearing the cache a new slice should be generated');
-    assert.equal(countBlocks(refreshed), 2, 'refreshed slice should still pick 2');
-
     // 激活列表变化（sig 变化）→ 重新生成缓存切片
     sharedPart.activeIds = ['o3', 'o4'];
-    randomSeq.length = 0; randomSeq.push(0.99, 0.99);
     await window.fetch('https://st.local/api/chat', { method: 'POST', body });
     const regenerated = capturedBody;
     assert.equal(countBlocks(regenerated), 2, 'regenerated slice should pick 2 (both of the new active set)');
@@ -152,7 +134,7 @@ async function run() {
     const full = capturedBody;
     assert.equal(countBlocks(full), 3, 'when disabled, all active shared outfits are injected');
 
-    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full)');
+    console.log('random-inject: pass (slice on first / cache reuse / regenerate on change / disable → full)');
 }
 
 run().catch((err) => {

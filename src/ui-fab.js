@@ -3,7 +3,7 @@
 
 import { load, loadMeta, saveMeta } from './db.js';
 import { getById } from './data.js';
-import { esc, compressImage, toast } from './utils.js';
+import { esc, compressImage } from './utils.js';
 import { fn } from './bridge.js';
 
 var SCRIPT_NAME = '穿搭管理';
@@ -103,29 +103,6 @@ function injectFab() {
 
     mainBtn.id = 'om-fab-main-btn';
     container.appendChild(mainBtn);
-
-    // 随机注入刷新按钮（仅在开启随机注入时显示；悬浮球左侧，随球拖动）
-    if (d.randomInject) {
-        var refreshBtn = document.createElement('div');
-        refreshBtn.id = 'om-fab-refresh';
-        refreshBtn.title = '重新随机通用衣柜穿搭';
-        refreshBtn.innerHTML = '<i class="fa-solid fa-shuffle" style="pointer-events:none;font-size:11px;color:#fff;"></i>';
-        refreshBtn.setAttribute('style',
-            'position:absolute;right:calc(100% + 6px);top:0;bottom:0;margin:auto 0;' +
-            'width:20px;height:20px;border-radius:50%;flex-shrink:0;' +
-            'background:rgba(0,0,0,.38);border:1px solid rgba(255,255,255,.28);' +
-            'cursor:pointer;display:flex;align-items:center;justify-content:center;' +
-            'box-shadow:0 2px 8px rgba(0,0,0,.3);pointer-events:auto;' +
-            'transition:transform .18s ease;');
-        refreshBtn.addEventListener('click', function (e) {
-            e.stopPropagation();
-            if (fn.refreshRandomSlice) fn.refreshRandomSlice();
-            refreshBtn.style.transform = 'rotate(180deg) scale(.9)';
-            setTimeout(function () { refreshBtn.style.transform = ''; }, 220);
-            toast('🔄 已重新随机通用衣柜穿搭');
-        });
-        container.insertBefore(refreshBtn, mainBtn);
-    }
 
     // 拖拽 + 点击判断
     var _dragState = { sx: 0, sy: 0, ox: 0, oy: 0, moved: false, handled: false };

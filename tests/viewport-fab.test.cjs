@@ -153,10 +153,9 @@ async function run() {
             }, { context });
         }
         if (specifier === './utils.js') {
-            return new vm.SyntheticModule(['esc', 'compressImage', 'toast'], function () {
+            return new vm.SyntheticModule(['esc', 'compressImage'], function () {
                 this.setExport('esc', (value) => String(value || ''));
                 this.setExport('compressImage', (_value, cb) => cb(_value));
-                this.setExport('toast', () => {});
             }, { context });
         }
         if (specifier === './bridge.js') {

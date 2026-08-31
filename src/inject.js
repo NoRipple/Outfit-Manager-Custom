@@ -27,11 +27,6 @@ function pickRandomOutfits(outs, n) {
     return pool.slice(0, count);
 }
 
-// 手动/事件刷新随机切片：清空缓存，下一次注入重新随机抽取
-export function clearRandomInjectCache() {
-    sharedRandomCache = null;
-}
-
 // 获取注入用的图片URL列表（server模式下优先用预解析的base64）
 function getInjectImageUrls(outfit) {
     var imgs = getOutfitImages(outfit);
@@ -450,35 +445,6 @@ function registerCompletionEventInjection() {
     });
 }
 
-// 新建聊天时自动刷新随机切片（仅"新建/切到空聊天"，切换旧聊天不刷新）
-function registerNewChatRefresh() {
-    if (window.__omNewChatRefreshInstalled) return;
-    window.__omNewChatRefreshInstalled = true;
-
-    import('/script.js').then(function (mod) {
-        var eventSource = mod && mod.eventSource;
-        var eventTypes = mod && mod.event_types;
-        var eventName = eventTypes && eventTypes.CHAT_CHANGED;
-        if (!eventSource || !eventName || typeof eventSource.on !== 'function') return;
-
-        var handler = function () {
-            try {
-                var ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
-                var chat = ctx && ctx.chat;
-                // 新聊天 = 切换后当前聊天为空（无消息）；旧聊天切换不刷新
-                if (!chat || chat.length === 0) clearRandomInjectCache();
-            } catch (e) {}
-        };
-
-        eventSource.on(eventName, handler);
-        if (typeof eventSource.makeFirst === 'function') {
-            eventSource.makeFirst(eventName, handler);
-        }
-    }).catch(function () {
-        window.__omNewChatRefreshInstalled = false;
-    });
-}
-
 // ── 安装拦截器 ─────────────────────────────────────────
 export function setupInjection() {
     // 防止重复安装（热重载等场景）
@@ -486,7 +452,6 @@ export function setupInjection() {
     window.__omInjectionInstalled = true;
 
     registerCompletionEventInjection();
-    registerNewChatRefresh();
 
     var origFetch = window.fetch;
     window.fetch = function (input, init) {
