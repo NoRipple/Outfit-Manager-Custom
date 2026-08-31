@@ -35,6 +35,13 @@ class FakeElement {
         child.parentNode = null;
         return child;
     }
+    insertBefore(child, ref) {
+        child.parentNode = this;
+        const index = this.children.indexOf(ref);
+        if (index === -1) this.children.push(child);
+        else this.children.splice(index, 0, child);
+        return child;
+    }
     setAttribute(name, value) {
         this.attributes[name] = String(value);
         if (name === 'style') {

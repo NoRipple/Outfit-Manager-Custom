@@ -152,7 +152,16 @@ async function run() {
     const full = capturedBody;
     assert.equal(countBlocks(full), 3, 'when disabled, all active shared outfits are injected');
 
-    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full)');
+    // 注入总开关：injectEnabled=false → 完全不注入（body 保持不变）
+    meta.injectEnabled = false;
+    sharedPart.activeIds = ['o1', 'o2'];
+    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    assert.equal(capturedBody, body, 'when injectEnabled=false the request body must not be modified');
+    meta.injectEnabled = true;
+    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    assert.notEqual(capturedBody, body, 're-enabling injectEnabled should inject again');
+
+    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off)');
 }
 
 run().catch((err) => {

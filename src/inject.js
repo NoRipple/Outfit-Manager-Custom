@@ -208,6 +208,7 @@ function tryInjectPayload(p) {
     if (!p.messages && p.prompt === undefined) return false;
 
     var meta = loadMeta();
+    if (meta.injectEnabled === false) return null;  // 注入总开关：关闭时跳过注入
     var pos = meta.injectPosition || 'user';
     var useImg = (meta.mode === 'image' || meta.mode === 'both');
     var useText = (meta.mode === 'text' || meta.mode === 'both');

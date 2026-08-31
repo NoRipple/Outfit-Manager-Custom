@@ -37,6 +37,7 @@ export function defMeta() {
 
         // 注入配置
         mode: 'text',
+        injectEnabled: true,
         injectPosition: 'user',
         // 随机注入（仅对通用衣柜生效）
         randomInject: false,

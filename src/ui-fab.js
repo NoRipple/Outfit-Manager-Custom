@@ -104,6 +104,31 @@ function injectFab() {
     mainBtn.id = 'om-fab-main-btn';
     container.appendChild(mainBtn);
 
+    // 注入快捷开关（始终显示；悬浮球左侧，随球拖动）—— 一键禁用/启用注入
+    var injectOn = d.injectEnabled !== false;
+    var injToggleBtn = document.createElement('div');
+    injToggleBtn.id = 'om-fab-inject-toggle';
+    injToggleBtn.title = injectOn ? '点击禁用注入' : '点击启用注入';
+    injToggleBtn.innerHTML = '<i class="fa-solid ' + (injectOn ? 'fa-toggle-on' : 'fa-toggle-off') + '" style="pointer-events:none;font-size:13px;color:' + (injectOn ? '#7c6daf' : '#9a9a9a') + ';"></i>';
+    injToggleBtn.setAttribute('style',
+        'position:absolute;right:calc(100% + 6px);top:0;bottom:0;margin:auto 0;' +
+        'width:22px;height:22px;border-radius:50%;flex-shrink:0;' +
+        'background:rgba(0,0,0,.38);border:1px solid rgba(255,255,255,.25);' +
+        'cursor:pointer;display:flex;align-items:center;justify-content:center;' +
+        'box-shadow:0 2px 8px rgba(0,0,0,.3);pointer-events:auto;' +
+        'transition:transform .15s ease;');
+    injToggleBtn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var m = loadMeta();
+        m.injectEnabled = (m.injectEnabled === false) ? true : false;
+        saveMeta(m);
+        var nowOn = m.injectEnabled !== false;
+        this.title = nowOn ? '点击禁用注入' : '点击启用注入';
+        this.innerHTML = '<i class="fa-solid ' + (nowOn ? 'fa-toggle-on' : 'fa-toggle-off') + '" style="pointer-events:none;font-size:13px;color:' + (nowOn ? '#7c6daf' : '#9a9a9a') + ';"></i>';
+        toast(nowOn ? '✅ 注入已启用' : '⏸ 注入已禁用');
+    });
+    container.insertBefore(injToggleBtn, mainBtn);
+
     // 随机注入刷新按钮（仅在开启随机注入时显示；悬浮球左侧，随球拖动）
     if (d.randomInject) {
         var refreshBtn = document.createElement('div');
@@ -111,7 +136,7 @@ function injectFab() {
         refreshBtn.title = '重新随机通用衣柜穿搭';
         refreshBtn.innerHTML = '<i class="fa-solid fa-shuffle" style="pointer-events:none;font-size:11px;color:#fff;"></i>';
         refreshBtn.setAttribute('style',
-            'position:absolute;right:calc(100% + 6px);top:0;bottom:0;margin:auto 0;' +
+            'position:absolute;right:calc(100% + 34px);top:0;bottom:0;margin:auto 0;' +
             'width:20px;height:20px;border-radius:50%;flex-shrink:0;' +
             'background:rgba(0,0,0,.38);border:1px solid rgba(255,255,255,.28);' +
             'cursor:pointer;display:flex;align-items:center;justify-content:center;' +

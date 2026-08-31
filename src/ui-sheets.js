@@ -1037,6 +1037,7 @@ function openSettingsSheet() {
         '<div class="om-sheet-title"><i class="fa-solid fa-sliders"></i>设置</div>',
 
         '<div class="om-sec-title">发送内容</div>',
+        '<div class="om-setting-row om-row-inline"><label>启用注入 <span class="om-hint">关闭后暂停把穿搭信息注入给 AI</span></label><input type="checkbox" class="om-chk" id="om-inject-enabled"' + (d.injectEnabled !== false ? ' checked' : '') + ' /></div>',
         '<div class="om-setting-row"><label>发送给 AI 的内容类型</label><select id="om-mode">',
         '<option value="text"' + (d.mode === 'text' ? ' selected' : '') + '>仅文字描述</option>',
         '<option value="image"' + (d.mode === 'image' ? ' selected' : '') + '>仅图片</option>',
@@ -1130,6 +1131,12 @@ function openSettingsSheet() {
     ].join(''));
 
     sheet.querySelector('#om-mode').addEventListener('change', function () { var m = loadMeta(); m.mode = this.value; saveMeta(m); });
+    sheet.querySelector('#om-inject-enabled').addEventListener('change', function () {
+        var m = loadMeta(); m.injectEnabled = this.checked; saveMeta(m);
+        // 同步重建悬浮球，刷新注入快捷开关状态
+        var oldFab = document.getElementById('om-fab-main'); if (oldFab && oldFab.parentNode) oldFab.parentNode.removeChild(oldFab);
+        if (m.showBall !== false && fn.injectFab) fn.injectFab();
+    });
     sheet.querySelector('#om-inject-pos').addEventListener('change', function () { var m = loadMeta(); m.injectPosition = this.value; saveMeta(m); });
     sheet.querySelector('#om-random-inject').addEventListener('change', function () {
         var m = loadMeta(); m.randomInject = this.checked; saveMeta(m);
