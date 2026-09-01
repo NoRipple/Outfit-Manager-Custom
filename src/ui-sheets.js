@@ -1038,7 +1038,6 @@ function openSettingsSheet() {
 
         '<div class="om-sec-title">发送内容</div>',
         '<div class="om-setting-row om-row-inline"><label>启用注入 <span class="om-hint">关闭后暂停把穿搭信息注入给 AI</span></label><input type="checkbox" class="om-chk" id="om-inject-enabled"' + (d.injectEnabled !== false ? ' checked' : '') + ' /></div>',
-        '<div class="om-setting-row"><label>注入间隔 <span class="om-hint">每 N 轮用户消息注入一次，1 = 每轮都注入</span></label><input type="number" id="om-inject-every" min="1" max="20" value="' + (d.injectEvery || 1) + '" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;font-family:inherit" /></div>',
         '<div class="om-setting-row"><label>发送给 AI 的内容类型</label><select id="om-mode">',
         '<option value="text"' + (d.mode === 'text' ? ' selected' : '') + '>仅文字描述</option>',
         '<option value="image"' + (d.mode === 'image' ? ' selected' : '') + '>仅图片</option>',
@@ -1050,6 +1049,8 @@ function openSettingsSheet() {
         '<option value="context"' + (d.injectPosition === 'context' ? ' selected' : '') + '>上下文末尾</option>',
         '<option value="user"' + (d.injectPosition === 'user' || !d.injectPosition ? ' selected' : '') + '>用户消息末尾（推荐）</option>',
         '</select></div>',
+        // 注入间隔仅当注入位置为"用户消息末尾"时显示
+        '<div class="om-setting-row" id="om-inject-every-row"' + ((d.injectPosition === 'user' || !d.injectPosition) ? '' : ' style="display:none"') + '><label>注入间隔 <span class="om-hint">每 N 轮用户消息注入一次，1 = 每轮都注入</span></label><input type="number" id="om-inject-every" min="1" max="20" value="' + (d.injectEvery || 1) + '" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;font-family:inherit" /></div>',
 
         '<div class="om-divider"></div>',
         '<div class="om-sec-title">随机注入 <span class="om-hint">（仅对通用衣柜生效）</span></div>',
@@ -1146,7 +1147,11 @@ function openSettingsSheet() {
         this.value = v;
         saveMeta(m);
     });
-    sheet.querySelector('#om-inject-pos').addEventListener('change', function () { var m = loadMeta(); m.injectPosition = this.value; saveMeta(m); });
+    sheet.querySelector('#om-inject-pos').addEventListener('change', function () {
+        var m = loadMeta(); m.injectPosition = this.value; saveMeta(m);
+        var everyRow = sheet.querySelector('#om-inject-every-row');
+        if (everyRow) everyRow.style.display = (this.value === 'user') ? '' : 'none';
+    });
     sheet.querySelector('#om-random-inject').addEventListener('change', function () {
         var m = loadMeta(); m.randomInject = this.checked; saveMeta(m);
         // 重建悬浮球以显示/隐藏刷新按钮
