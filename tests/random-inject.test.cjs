@@ -185,9 +185,18 @@ async function run() {
     var b4 = makeBody(4);
     await window.fetch('https://st.local/api/chat', { method: 'POST', body: b4 });
     assert.equal(capturedBody, b4, 'turn 4 (4 user msgs) should be skipped');
+
+    // 注入间隔仅对"用户消息末尾"位置生效；系统提示/上下文末尾始终每轮注入
+    meta.injectPosition = 'system';
+    await window.fetch('https://st.local/api/chat', { method: 'POST', body: b2 });
+    assert.notEqual(capturedBody, b2, 'system position should inject every turn regardless of injectEvery');
+    meta.injectPosition = 'context';
+    await window.fetch('https://st.local/api/chat', { method: 'POST', body: b2 });
+    assert.notEqual(capturedBody, b2, 'context position should inject every turn regardless of injectEvery');
+    meta.injectPosition = 'user';
     meta.injectEvery = 1;
 
-    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off / injectEvery floor)');
+    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off / injectEvery floor + user-only)');
 }
 
 run().catch((err) => {

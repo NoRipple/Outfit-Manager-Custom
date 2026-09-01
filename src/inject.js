@@ -314,8 +314,9 @@ function tryInjectPayload(p) {
     if (owners.length === 0) return null;
 
     // ── 注入时机：每 N 轮注入一次（按当前会话用户消息楼层计数）──
+    // 该间隔仅对"用户消息末尾"位置生效；系统提示/上下文末尾为会话级固定位置，始终每轮注入
     var every = (typeof meta.injectEvery === 'number' && meta.injectEvery >= 1) ? Math.floor(meta.injectEvery) : 1;
-    if (every > 1) {
+    if (every > 1 && pos === 'user') {
         var turnCount = 0;
         if (p.messages && Array.isArray(p.messages)) {
             for (var tmi = 0; tmi < p.messages.length; tmi++) {
