@@ -161,33 +161,7 @@ async function run() {
     await window.fetch('https://st.local/api/chat', { method: 'POST', body });
     assert.notEqual(capturedBody, body, 're-enabling injectEnabled should inject again');
 
-    // 注入间隔：injectEvery=N 时按会话用户消息楼层注入（第 1、N+1、2N+1...轮）
-    meta.injectEvery = 2;
-    meta.randomInject = false;
-    sharedPart.activeIds = ['o1', 'o2'];
-    function makeBody(userCount) {
-        var msgs = [{ role: 'system', content: 'sys' }];
-        for (var i = 0; i < userCount; i++) {
-            if (i > 0) msgs.push({ role: 'assistant', content: 'a' + i });
-            msgs.push({ role: 'user', content: 'u' + (i + 1) });
-        }
-        return JSON.stringify({ messages: msgs });
-    }
-    var b1 = makeBody(1);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body: b1 });
-    assert.notEqual(capturedBody, b1, 'turn 1 (1 user msg) should inject');
-    var b2 = makeBody(2);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body: b2 });
-    assert.equal(capturedBody, b2, 'turn 2 (2 user msgs) should be skipped');
-    var b3 = makeBody(3);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body: b3 });
-    assert.notEqual(capturedBody, b3, 'turn 3 (3 user msgs) should inject');
-    var b4 = makeBody(4);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body: b4 });
-    assert.equal(capturedBody, b4, 'turn 4 (4 user msgs) should be skipped');
-    meta.injectEvery = 1;
-
-    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off / injectEvery floor)');
+    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off)');
 }
 
 run().catch((err) => {

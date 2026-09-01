@@ -313,19 +313,6 @@ function tryInjectPayload(p) {
 
     if (owners.length === 0) return null;
 
-    // ── 注入时机：每 N 轮注入一次（按当前会话用户消息楼层计数）──
-    var every = (typeof meta.injectEvery === 'number' && meta.injectEvery >= 1) ? Math.floor(meta.injectEvery) : 1;
-    if (every > 1) {
-        var turnCount = 0;
-        if (p.messages && Array.isArray(p.messages)) {
-            for (var tmi = 0; tmi < p.messages.length; tmi++) {
-                if (p.messages[tmi] && p.messages[tmi].role === 'user') turnCount++;
-            }
-        }
-        // 数不到用户消息时回退为注入；否则按“第 1、N+1、2N+1…轮”注入
-        if (turnCount > 0 && (turnCount % every) !== 1) return null;
-    }
-
     // ── 组装注入内容（v2 + 单品支持）──
     var allTextParts = [];
     var ownerImageGroups = [];
