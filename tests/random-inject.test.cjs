@@ -66,6 +66,7 @@ async function run() {
         Date,
         Error,
         location: { href: 'https://st.local/', origin: 'https://st.local' },
+        URL,
         SillyTavern: { getContext: () => ({ name2: 'Alice', chat: [] }) },
         window,
         XMLHttpRequest: XHR
@@ -115,7 +116,7 @@ async function run() {
 
     // 第 1 次注入：randomSeq=[0,0] → 确定抽到 [o1,o2]
     randomSeq.length = 0; randomSeq.push(0, 0);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     const first = capturedBody;
     assert.ok(first, 'first injection should produce a body');
     assert.equal(countBlocks(first), 2, 'first injection should pick exactly 2 outfits');
@@ -123,7 +124,7 @@ async function run() {
         'deterministic first slice should be [o1,o2] (西装外套, 休闲T恤)');
 
     // 第 2 次注入：缓存复用，内容应与第 1 次完全一致（不消费 randomSeq）
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     const second = capturedBody;
     assert.equal(second, first, 'subsequent injection must reuse the cached random slice');
 
@@ -131,7 +132,7 @@ async function run() {
     assert.equal(typeof mod.namespace.clearRandomInjectCache, 'function', 'clearRandomInjectCache should be exported');
     mod.namespace.clearRandomInjectCache();
     randomSeq.length = 0; randomSeq.push(0.99, 0.99);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     const refreshed = capturedBody;
     assert.ok(refreshed !== first, 'after clearing the cache a new slice should be generated');
     assert.equal(countBlocks(refreshed), 2, 'refreshed slice should still pick 2');
@@ -139,7 +140,7 @@ async function run() {
     // 激活列表变化（sig 变化）→ 重新生成缓存切片
     sharedPart.activeIds = ['o3', 'o4'];
     randomSeq.length = 0; randomSeq.push(0.99, 0.99);
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     const regenerated = capturedBody;
     assert.equal(countBlocks(regenerated), 2, 'regenerated slice should pick 2 (both of the new active set)');
     assert.ok(descsIn(regenerated).indexOf('晚礼服') !== -1 && descsIn(regenerated).indexOf('运动服') !== -1,
@@ -148,20 +149,39 @@ async function run() {
     // 关闭随机注入 → 注入全部激活穿搭，缓存被清空
     meta.randomInject = false;
     sharedPart.activeIds = ['o1', 'o2', 'o3'];
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     const full = capturedBody;
     assert.equal(countBlocks(full), 3, 'when disabled, all active shared outfits are injected');
 
     // 注入总开关：injectEnabled=false → 完全不注入（body 保持不变）
     meta.injectEnabled = false;
     sharedPart.activeIds = ['o1', 'o2'];
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     assert.equal(capturedBody, body, 'when injectEnabled=false the request body must not be modified');
     meta.injectEnabled = true;
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     assert.notEqual(capturedBody, body, 're-enabling injectEnabled should inject again');
 
-    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off)');
+    // 只对"真正的聊天请求"注入：
+    // 1) 聊天 URL + 裸 prompt（无 messages 数组）→ 不注入
+    const promptBody = JSON.stringify({ prompt: 'a beautiful girl', max_tokens: 20 });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: promptBody });
+    assert.equal(capturedBody, promptBody, 'prompt-only body must not be injected');
+
+    // 2) 非聊天 URL（模拟智绘姬生图端点）+ 聊天形态 body → 不注入
+    const imgBody = JSON.stringify({ messages: [{ role: 'user', content: 'draw me' }] });
+    await window.fetch('https://st.local/api/zhihuiji/generate-image', { method: 'POST', body: imgBody });
+    assert.equal(capturedBody, imgBody, 'non-chat URL must not be injected');
+
+    // 3) Claude /v1/messages 与 Gemini :generateContent 端点（messages 形态）→ 注入
+    const claudeBody = JSON.stringify({ messages: [{ role: 'user', content: 'claude hi' }] });
+    await window.fetch('https://api.anthropic.com/v1/messages', { method: 'POST', body: claudeBody });
+    assert.notEqual(capturedBody, claudeBody, 'anthropic /v1/messages should inject');
+    const geminiBody = JSON.stringify({ messages: [{ role: 'user', content: 'gemini hi' }] });
+    await window.fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', { method: 'POST', body: geminiBody });
+    assert.notEqual(capturedBody, geminiBody, 'gemini :generateContent URL should inject');
+
+    console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off / chat-only gate)');
 }
 
 run().catch((err) => {

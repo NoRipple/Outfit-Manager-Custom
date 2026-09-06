@@ -202,10 +202,38 @@ function isBaibaokuSaveGenerateRequest(input) {
     }
 }
 
+// 是否"真正的聊天请求体"：必须含 messages 数组，且至少一条消息具备 role + content（字符串或多模态数组）
+function isChatPayload(p) {
+    if (!p || typeof p !== 'object' || !Array.isArray(p.messages)) return false;
+    for (var i = 0; i < p.messages.length; i++) {
+        var m = p.messages[i];
+        if (m && typeof m === 'object' && typeof m.role === 'string' &&
+            (typeof m.content === 'string' || Array.isArray(m.content))) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// 聊天 API 端点特征：OpenAI 系 /chat/completions、Anthropic /v1/messages、Gemini :generateContent
+var CHAT_URL_HINTS = ['/chat/completions', '/v1/messages', ':generateContent'];
+function isChatLikeUrl(rawUrl) {
+    try {
+        if (!rawUrl) return false;
+        var url = new URL(rawUrl, typeof location !== 'undefined' ? location.href : undefined);
+        var p = url.pathname + url.search;
+        for (var i = 0; i < CHAT_URL_HINTS.length; i++) {
+            if (p.indexOf(CHAT_URL_HINTS[i]) !== -1) return true;
+        }
+    } catch (e) {}
+    return false;
+}
+
 function tryInjectPayload(p) {
     if (!p || typeof p !== 'object' || Array.isArray(p)) return false;
     if (p.__omInjected) return false;
-    if (!p.messages && p.prompt === undefined) return false;
+    // 只注入真正的聊天请求（messages 数组，role+content 结构）；不再处理裸 prompt 请求体
+    if (!isChatPayload(p)) return false;
 
     var meta = loadMeta();
     if (meta.injectEnabled === false) return null;  // 注入总开关：关闭时跳过注入
@@ -502,18 +530,32 @@ export function setupInjection() {
                 return origFetch.apply(this, arguments);
             }
             if (init && init.body && typeof init.body === 'string') {
-                var nb = tryInjectBody(init.body, { baibaokuSaveGenerate: isBaibaokuSaveGenerateRequest(input) });
-                if (nb) { init = Object.assign({}, init, { body: nb }); return origFetch.call(this, input, init); }
+                // 只拦截真正的聊天请求：URL 命中聊天端点特征，或百宝库回写路径（嵌套聊天体）
+                var isBaibao = isBaibaokuSaveGenerateRequest(input);
+                if (isBaibao || isChatLikeUrl(getFetchUrl(input))) {
+                    var nb = tryInjectBody(init.body, { baibaokuSaveGenerate: isBaibao });
+                    if (nb) { init = Object.assign({}, init, { body: nb }); return origFetch.call(this, input, init); }
+                }
             }
         } catch (e) {}
         return origFetch.apply(this, arguments);
     };
 
-    // XHR 拦截：部分宿主环境下 XMLHttpRequest 不可用，做防御判断，避免中断插件初始化
-    if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.prototype && typeof XMLHttpRequest.prototype.send === 'function') {
+    // XHR 拦截：记录 open 的 URL，仅在聊天类 URL 上注入；XMLHttpRequest 不可用时跳过
+    if (typeof XMLHttpRequest !== 'undefined' && XMLHttpRequest.prototype && typeof XMLHttpRequest.prototype.open === 'function' && typeof XMLHttpRequest.prototype.send === 'function') {
+        var origOpen = XMLHttpRequest.prototype.open;
+        XMLHttpRequest.prototype.open = function (method, url) {
+            try { this.__omLastUrl = url; } catch (e) {}
+            return origOpen.apply(this, arguments);
+        };
         var origSend = XMLHttpRequest.prototype.send;
         XMLHttpRequest.prototype.send = function (body) {
-            try { if (body && typeof body === 'string') { var nb = tryInjectBody(body); if (nb) return origSend.call(this, nb); } } catch (e) {}
+            try {
+                if (body && typeof body === 'string' && isChatLikeUrl(this.__omLastUrl)) {
+                    var nb = tryInjectBody(body);
+                    if (nb) return origSend.call(this, nb);
+                }
+            } catch (e) {}
             return origSend.apply(this, arguments);
         };
     }

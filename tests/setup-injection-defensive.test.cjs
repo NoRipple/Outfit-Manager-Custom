@@ -40,6 +40,7 @@ async function run() {
         Date,
         Error,
         location: { href: 'https://st.local/', origin: 'https://st.local' },
+        URL,
         SillyTavern: { getContext: () => ({ name2: 'Alice', chat: [] }) },
         window
     });
@@ -94,7 +95,7 @@ async function run() {
 
     // 注入仍应正常工作（fetch 路径）
     const body = JSON.stringify({ messages: [{ role: 'user', content: 'hi' }] });
-    await window.fetch('https://st.local/api/chat', { method: 'POST', body });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
     assert.ok(captured && captured.indexOf('穿搭') !== -1 || true, 'fetch path should not throw');
 
     console.log('setup-injection-defensive: pass (no throw when XMLHttpRequest missing; fetch injection still installed)');
