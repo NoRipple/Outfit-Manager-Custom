@@ -50,8 +50,9 @@ async function run() {
 
     await mod.link(async (specifier) => {
         if (specifier === './db.js') {
-            return new vm.SyntheticModule(['loadMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById'], function () {
+            return new vm.SyntheticModule(['loadMeta', 'saveMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById'], function () {
                 this.setExport('loadMeta', () => meta);
+                this.setExport('saveMeta', (m) => { Object.assign(meta, m); });
                 this.setExport('loadActivePartitions', () => ({}));
                 this.setExport('currentUserPartKey', () => 'user:__default__');
                 this.setExport('charNameById', () => '');

@@ -1443,6 +1443,11 @@ function openSettingsSheet() {
         '<option value="tag_text"' + (d.injectMode === 'tag_text' || !d.injectMode ? ' selected' : '') + '>标签 + 文字</option>',
         '<option value="tag"' + (d.injectMode === 'tag' ? ' selected' : '') + '>仅标签</option>',
         '</select></div>',
+        '<div class="om-setting-row"><label>图片策略 <span class="om-hint">聊天模型能不能看图不确定时保持「自动」：发图被接口拒绝会自动改成只发文字并记住这个模型</span></label><select id="om-image-policy">' +
+        '<option value="auto"' + (d.imagePolicy === 'auto' || !d.imagePolicy ? ' selected' : '') + '>自动（推荐）</option>' +
+        '<option value="always"' + (d.imagePolicy === 'always' ? ' selected' : '') + '>始终带图</option>' +
+        '<option value="never"' + (d.imagePolicy === 'never' ? ' selected' : '') + '>从不带图</option>' +
+        '</select></div>',
         '<div class="om-setting-row om-row-inline"><label>要求 AI 标注本楼穿搭 <span class="om-hint">在注入内容里附名称清单，让 AI 回复末尾输出 &lt;Outfit-Manager-Custom&gt;名称/角色+…&lt;/Outfit-Manager-Custom&gt;，插件会把它渲染成可点卡片</span></label><input type="checkbox" class="om-chk" id="om-marker-enabled"' + (d.markerEnabled !== false ? ' checked' : '') + ' /></div>',
 
         '<div class="om-setting-row"><label>注入位置 <span class="om-hint">Gemini/DeepSeek 建议选\"用户消息\"</span></label><select id="om-inject-pos">',
@@ -1535,6 +1540,7 @@ function openSettingsSheet() {
 
     sheet.querySelector('#om-inject-mode').addEventListener('change', function () { var m = loadMeta(); m.injectMode = this.value; saveMeta(m); });
     sheet.querySelector('#om-marker-enabled').addEventListener('change', function () { var m = loadMeta(); m.markerEnabled = this.checked; saveMeta(m); });
+    sheet.querySelector('#om-image-policy').addEventListener('change', function () { var m = loadMeta(); m.imagePolicy = this.value; saveMeta(m); });
     sheet.querySelector('#om-inject-enabled').addEventListener('change', function () {
         var m = loadMeta(); m.injectEnabled = this.checked; saveMeta(m);
         // 同步重建悬浮球，刷新注入快捷开关状态

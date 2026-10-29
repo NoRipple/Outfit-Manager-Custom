@@ -2,7 +2,7 @@
 // fetch/XHR 拦截 + 穿搭信息注入到 AI 请求
 // v2: 使用 loadMeta() + loadActivePartitions() 代替旧 load() 全量读取
 
-import { loadMeta, loadActivePartitions, currentUserPartKey, charNameById } from './db.js';
+import { loadMeta, saveMeta, loadActivePartitions, currentUserPartKey, charNameById } from './db.js';
 import { SHARED_CHAR_KEY, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags, garmentItemText } from './data.js';
 import { toast } from './utils.js';
 import { state } from './bridge.js';
@@ -26,17 +26,64 @@ function buildTagLine(o) {
     return parts.join('');
 }
 
-// 判断当前聊天模型是否能吃图片：DeepSeek 官方接口只收文本，塞 image_url 会直接 400
-var imageFallbackToasted = false;
-function modelLikelyTextOnly(modelName) {
-    var m = String(modelName || '').toLowerCase();
-    if (!m) return false;
-    if (m.indexOf('vl') !== -1 || m.indexOf('vision') !== -1) return false;
-    var textOnly = ['deepseek', 'o1-mini', 'gpt-3.5', 'text-davinci', 'glm-4-flash'];
-    for (var i = 0; i < textOnly.length; i++) {
-        if (m.indexOf(textOnly[i]) !== -1) return true;
+// 图片能力：不猜模型名（同名系列里既有纯文本也有多模态），改为「手动策略 + 实测学习」
+// meta.imagePolicy: 'auto'（默认，遇到 400 自动学会并重发）/ 'always'（始终带图）/ 'never'（从不带图）
+// meta.modelImageSupport: { '模型名': false } —— 被接口实际拒绝过的模型，下次直接跳过图片
+var imageDowngradeToasted = false;
+function modelRejectsImages(meta, modelName) {
+    var policy = (meta && meta.imagePolicy) || 'auto';
+    if (policy === 'never') return true;
+    if (policy === 'always') return false;
+    var map = (meta && meta.modelImageSupport) || {};
+    return map[modelName] === false;
+}
+
+function bodyHasImages(bodyStr) {
+    return typeof bodyStr === 'string' && bodyStr.indexOf('"image_url"') !== -1;
+}
+
+// 把请求体里所有 image_url 块去掉，content 只剩一段文字时压成字符串
+function stripImagesFromBody(bodyStr) {
+    try {
+        var payload = JSON.parse(bodyStr);
+        var fixMessages = function (list) {
+            if (!Array.isArray(list)) return;
+            list.forEach(function (m) {
+                if (!m || !Array.isArray(m.content)) return;
+                m.content = m.content.filter(function (b) { return !(b && b.type === 'image_url'); });
+                if (m.content.length === 1 && m.content[0] && m.content[0].type === 'text') {
+                    m.content = m.content[0].text;
+                }
+            });
+        };
+        fixMessages(payload.messages);
+        if (payload && payload.data && Array.isArray(payload.data.messages)) fixMessages(payload.data.messages);
+        return JSON.stringify(payload);
+    } catch (e) {
+        return bodyStr;
     }
-    return false;
+}
+
+// 接口是不是在抱怨图片
+function looksLikeImageRejection(text) {
+    if (!text) return false;
+    var t = String(text).toLowerCase();
+    var aboutImage = t.indexOf('image') !== -1 || t.indexOf('vision') !== -1 || t.indexOf('multimodal') !== -1;
+    var rejected = t.indexOf('unsupported') !== -1 || t.indexOf('invalid') !== -1 ||
+        t.indexOf('not support') !== -1 || t.indexOf('unknown variant') !== -1 || t.indexOf('not accept') !== -1;
+    return aboutImage && rejected;
+}
+
+function rememberNoImageSupport(modelName) {
+    if (!modelName) return;
+    try {
+        var meta = loadMeta();
+        if (!meta.modelImageSupport || typeof meta.modelImageSupport !== 'object') meta.modelImageSupport = {};
+        if (meta.modelImageSupport[modelName] === false) return;
+        meta.modelImageSupport[modelName] = false;
+        saveMeta(meta);
+        toast('模型「' + modelName + '」不接受图片输入，已自动改为只发文字（下次会直接跳过图片）。');
+    } catch (e) {}
 }
 
 // 让 AI 在回复末尾标注本楼用到的穿搭（正文标记格式）
@@ -281,12 +328,12 @@ function tryInjectPayload(p) {
     var useText = (injectMode === 'tag_text' || injectMode === 'tag_text_image');
     var tagOnly = (injectMode === 'tag');
 
-    // 当前聊天模型不收图片（如 DeepSeek 官方接口）时，自动降级为「标签 + 文字」，避免 400
-    if (useImg && modelLikelyTextOnly(p.model)) {
+    // 图片能力：只看手动策略和实测学习结果，不按模型名猜
+    if (useImg && modelRejectsImages(meta, p.model)) {
         useImg = false;
-        if (!imageFallbackToasted) {
-            imageFallbackToasted = true;
-            toast('当前模型「' + p.model + '」不支持图片输入，已自动改用「标签 + 文字」发送。可在设置里把内容类型改成「标签 + 文字」以消除此提示。');
+        if (!imageDowngradeToasted) {
+            imageDowngradeToasted = true;
+            toast('模型「' + p.model + '」之前拒绝过图片输入，本次改为「标签 + 文字」发送。设置 → 发送内容 → 图片策略 可改回「始终带图」。');
         }
     }
 
@@ -597,7 +644,23 @@ export function setupInjection() {
                 var isBaibao = isBaibaokuSaveGenerateRequest(input);
                 if (isBaibao || isChatLikeUrl(getFetchUrl(input))) {
                     var nb = tryInjectBody(init.body, { baibaokuSaveGenerate: isBaibao });
-                    if (nb) { init = Object.assign({}, init, { body: nb }); return origFetch.call(this, input, init); }
+                    if (nb) {
+                        var nextInit = Object.assign({}, init, { body: nb });
+                        var req = origFetch.call(this, input, nextInit);
+                        // 实测学习：接口拒绝图片 → 记住该模型，并用去掉图片的请求体重发一次
+                        if (!bodyHasImages(nb)) return req;
+                        var modelName = '';
+                        try { modelName = JSON.parse(nb).model || ''; } catch (e2) {}
+                        var self = this;
+                        return req.then(function (res) {
+                            if (!res || res.ok) return res;
+                            return res.clone().text().then(function (txt) {
+                                if (!looksLikeImageRejection(txt)) return res;
+                                rememberNoImageSupport(modelName);
+                                return origFetch.call(self, input, Object.assign({}, init, { body: stripImagesFromBody(nb) }));
+                            }).catch(function () { return res; });
+                        });
+                    }
                 }
             }
         } catch (e) {}

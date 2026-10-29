@@ -77,6 +77,8 @@ export function defMeta() {
         mode: 'text',
         injectMode: 'tag_text',     // 发送内容：tag 仅标签 / tag_text 标签+文字 / tag_text_image 标签+文字+图片
         injectEnabled: true,
+        imagePolicy: 'auto',        // 图片策略：auto 实测学习 / always 始终带图 / never 从不带图
+        modelImageSupport: {},      // { 模型名: false } 被接口拒绝过图片的模型
         markerEnabled: true,        // 要求 AI 在回复末尾标注本楼用到的穿搭（正文标记）
         injectPosition: 'user',
         // 随机注入（仅对通用衣柜生效）

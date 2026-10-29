@@ -37,16 +37,32 @@ async function run() {
         charMultiTemplate: '[{{charName}}的可选穿搭]\n{{wardrobe}}',
         imagePrompt: '图中为角色当前穿着。',
         multiImagePrompt: '以上为可选穿搭。',
+        imagePolicy: 'auto',
+        modelImageSupport: {},
         debug: false
     };
 
     let captured = null;
+    let rejectImagesOnce = false;
+    const okResponse = () => ({ ok: true, status: 200, clone: () => ({ text: () => Promise.resolve('') }) });
+    const badResponse = (msg) => ({
+        ok: false,
+        status: 400,
+        clone: () => ({ text: () => Promise.resolve(msg) }),
+        text: () => Promise.resolve(msg)
+    });
     const window = {
         __omCompletionEventInjectionInstalled: true,
         __omNewChatRefreshInstalled: true,
         fetch: (input, init) => {
-            captured = init ? init.body : null;
-            return Promise.resolve({ ok: true, status: 200 });
+            const body = init ? init.body : null;
+            if (rejectImagesOnce && body && body.indexOf('"image_url"') !== -1) {
+                rejectImagesOnce = false;
+                captured = body;
+                return Promise.resolve(badResponse('{"error":{"message":"Unsupported image_url format"}}'));
+            }
+            captured = body;
+            return Promise.resolve(okResponse());
         }
     };
 
@@ -62,8 +78,9 @@ async function run() {
 
     await mod.link(async (specifier) => {
         if (specifier === './db.js') {
-            return new vm.SyntheticModule(['loadMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById'], function () {
+            return new vm.SyntheticModule(['loadMeta', 'saveMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById'], function () {
                 this.setExport('loadMeta', () => meta);
+                this.setExport('saveMeta', (m) => { Object.assign(meta, m); });
                 this.setExport('loadActivePartitions', () => ({
                     'char:__shared__': { outfits: [OUTFIT], activeIds: ['o1'], categories: [], accessories: [], accCategories: [] }
                 }));
@@ -147,17 +164,40 @@ async function run() {
     assert.equal(noMark.indexOf('<Outfit-Manager-Custom>'), -1, '标记提示：关闭后不应包含标记说明');
     delete meta.markerEnabled;
 
-    // ── 纯文本模型（DeepSeek）自动降级：即使选了「标签+文字+图片」也不塞图片 ──
+    // ── 图片能力：不按模型名猜（deepseek-v4.1-flash 这类多模态模型必须能收到图） ──
     meta.injectMode = 'tag_text_image';
     captured = null;
-    const dsBody = JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: '纯文本模型：G' }] });
-    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: dsBody });
-    assert.ok(captured, '降级：应捕获请求体');
-    assert.equal(captured.indexOf('image_url'), -1, '降级：deepseek 模型不应注入图片块');
-    assert.ok(captured.indexOf('【场景：通勤】') !== -1, '降级：仍应带标签');
-    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1, '降级：仍应带描述文字');
+    const mmBody = JSON.stringify({ model: 'deepseek-v4.1-flash', messages: [{ role: 'user', content: '多模态模型：G' }] });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: mmBody });
+    assert.ok(captured, '多模态：应捕获请求体');
+    assert.ok(captured.indexOf('image_url') !== -1, '多模态：未学过拒绝时应当照常带图');
 
-    console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示 / 纯文本模型降级)');
+    // ── 已学到该模型不收图片：直接跳过图片 ──
+    meta.modelImageSupport = { 'deepseek-v4.1-flash': false };
+    captured = null;
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: mmBody });
+    assert.equal(captured.indexOf('image_url'), -1, '已学习：该模型不应再塞图片');
+    assert.ok(captured.indexOf('【场景：通勤】') !== -1, '已学习：仍应带标签');
+
+    // ── 手动「从不带图」 ──
+    meta.modelImageSupport = {};
+    meta.imagePolicy = 'never';
+    captured = null;
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: mmBody });
+    assert.equal(captured.indexOf('image_url'), -1, '策略 never：不应带图');
+
+    // ── 实测学习：接口拒绝图片时，自动去掉图片重发一次，并记住该模型 ──
+    meta.imagePolicy = 'auto';
+    meta.modelImageSupport = {};
+    rejectImagesOnce = true;
+    captured = null;
+    const res = await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: mmBody });
+    assert.equal(res.ok, true, '学习：重发后应拿到成功响应');
+    assert.ok(captured, '学习：重发应捕获请求体');
+    assert.equal(captured.indexOf('image_url'), -1, '学习：重发的请求体不应包含图片');
+    assert.equal(meta.modelImageSupport['deepseek-v4.1-flash'], false, '学习：应记住该模型不接受图片');
+
+    console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示 / 多模态照常带图 / 已学习跳过 / never 策略 / 拒绝后自动重发)');
 }
 
 run().catch((err) => {
