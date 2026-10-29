@@ -9,6 +9,17 @@ const ROOT = path.resolve(__dirname, '..');
 
 async function run() {
     // ── 共享可变数据 ──
+    const charPart = {
+        outfits: [
+            { id: 'c1', description: '女仆装', sceneTag: 'home', kits: [] },
+            { id: 'c2', description: '水手服', sceneTag: 'school', kits: [] },
+            { id: 'c3', description: '和服', sceneTag: 'festival', kits: [] },
+            { id: 'c4', description: '泳装', sceneTag: 'beach', kits: [] }
+        ],
+        activeIds: ['c1', 'c2', 'c3', 'c4']
+    };
+    let parts = null;
+
     const sharedPart = {
         outfits: [
             { id: 'o1', description: '西装外套', sceneTag: 'office', kits: [] },
@@ -19,6 +30,7 @@ async function run() {
         ],
         activeIds: ['o1', 'o2', 'o3', 'o4', 'o5']
     };
+    parts = { 'char:__shared__': sharedPart };
 
     const meta = {
         _version: 2,
@@ -82,7 +94,7 @@ async function run() {
             return new vm.SyntheticModule(['loadMeta', 'saveMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById', 'resolveImageForExternal'], function () {
                 this.setExport('loadMeta', () => meta);
                 this.setExport('saveMeta', (m) => { Object.assign(meta, m); });
-                this.setExport('loadActivePartitions', () => ({ 'char:__shared__': sharedPart }));
+                this.setExport('loadActivePartitions', () => parts);
                 this.setExport('currentUserPartKey', () => 'user:__default__');
                 this.setExport('charNameById', () => '');
                 this.setExport('resolveImageForExternal', (u, cb) => cb(u));
@@ -191,6 +203,30 @@ async function run() {
     const geminiBody = JSON.stringify({ messages: [{ role: 'user', content: 'gemini hi' }] });
     await window.fetch('https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent', { method: 'POST', body: geminiBody });
     assert.notEqual(capturedBody, geminiBody, 'gemini :generateContent URL should inject');
+
+    // ── 角色衣柜（单人衣柜）也要按固定数量随机 ──
+    parts = { 'char:c_Test1234': charPart };
+    meta.randomInject = true;
+    meta.randomInjectCount = 2;
+    randomSeq.length = 0; randomSeq.push(0, 0);
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
+    const charFirst = capturedBody;
+    assert.equal(countBlocks(charFirst), 2, '角色衣柜：随机注入应只发 2 套');
+    const charDescs = ['女仆装', '水手服', '和服', '泳装'].filter((d) => charFirst.indexOf(d) !== -1);
+    assert.equal(charDescs.length, 2, '角色衣柜：应恰好包含 2 套的描述');
+
+    // 缓存复用：同一候选集再发一次，内容一致
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
+    assert.equal(capturedBody, charFirst, '角色衣柜：候选集未变时应复用缓存切片');
+
+    // 角色衣柜数量不足时全发
+    charPart.activeIds = ['c1', 'c2'];
+    mod.namespace.clearRandomInjectCache();
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
+    assert.equal(countBlocks(capturedBody), 2, '角色衣柜：数量不超过固定值时全发');
+
+    parts = { 'char:__shared__': sharedPart };
+    charPart.activeIds = ['c1', 'c2', 'c3', 'c4'];
 
     console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off / chat-only gate)');
 }

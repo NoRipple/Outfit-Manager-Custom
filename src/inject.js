@@ -13,7 +13,7 @@ var recentInjectedBodies = [];
 
 // 随机注入缓存（仅通用衣柜）：首次注入随机选取若干项生成缓存切片，后续注入复用
 // { sig: activeIds.join(','), outfits: [...] }；sig 变化时重新生成
-var sharedRandomCache = null;
+var randomCache = {};   // { [partKey]: { sig, outfits } } 按衣柜缓存的随机切片
 
 // 三组标签 → 注入用短串：【场景：通勤 / 约会】【服装：衬衫、百褶裙】【气质：干练】
 function buildTagLine(o) {
@@ -182,7 +182,7 @@ function pickRandomOutfits(outs, n) {
 
 // 手动/事件刷新随机切片：清空缓存，下一次注入重新随机抽取
 export function clearRandomInjectCache() {
-    sharedRandomCache = null;
+    randomCache = {};
 }
 
 // 获取注入用的图片URL列表（server模式下优先用预解析的base64）
@@ -488,6 +488,7 @@ function tryInjectPayload(p) {
             owners.push({
                 name: 'User',
                 outfits: userOutfits,
+                partKey: curUserPK,
                 partition: userPart,
                 tplSingle: meta.singleTemplate,
                 tplMulti: meta.multiTemplate
@@ -506,31 +507,15 @@ function tryInjectPayload(p) {
         });
     }
 
-    // 随机注入（仅通用衣柜）：开启后首次注入随机选取若干项并缓存，后续注入复用缓存
-    var injectSharedOutfits = sharedOutfits;
-    if (sharedOutfits.length > 0 && meta.randomInject) {
-        var randSig = (sharedPart.activeIds || []).join(',');
-        if (sharedRandomCache && sharedRandomCache.sig === randSig && sharedRandomCache.outfits.length > 0) {
-            injectSharedOutfits = sharedRandomCache.outfits;
-        } else {
-            var randCount = (typeof meta.randomInjectCount === 'number' && meta.randomInjectCount > 0)
-                ? Math.floor(meta.randomInjectCount) : 1;
-            injectSharedOutfits = pickRandomOutfits(sharedOutfits, randCount);
-            sharedRandomCache = { sig: randSig, outfits: injectSharedOutfits };
-        }
-    } else {
-        // 关闭随机注入或通用衣柜无激活时，清空缓存
-        sharedRandomCache = null;
-    }
-
-    if (injectSharedOutfits.length > 0) {
+    if (sharedOutfits.length > 0) {
         // 通用衣柜有激活 → 用当前角色卡名字注入，忽略所有单人衣柜
         var charName2 = '';
         try { charName2 = SillyTavern.getContext().name2 || ''; } catch (e) {}
         if (charName2) {
             owners.push({
                 name: charName2,
-                outfits: injectSharedOutfits,
+                outfits: sharedOutfits,
+                partKey: sharedPartKey,
                 partition: activeParts[sharedPartKey],
                 tplSingle: meta.charSingleTemplate,
                 tplMulti: meta.charMultiTemplate
@@ -556,6 +541,7 @@ function tryInjectPayload(p) {
                 owners.push({
                     name: ownerName,
                     outfits: charOutfits,
+                    partKey: pk,
                     partition: charPart,
                     tplSingle: meta.charSingleTemplate,
                     tplMulti: meta.charMultiTemplate
@@ -590,6 +576,26 @@ function tryInjectPayload(p) {
 
     // 过滤后没有可发的穿搭：直接不注入
     if (owners.length === 0) return false;
+
+    // ── 随机注入：每个衣柜各自按「固定数量」抽，抽完缓存；候选集变了才重抽 ──
+    if (meta.randomInject) {
+        var randCount = (typeof meta.randomInjectCount === 'number' && meta.randomInjectCount > 0)
+            ? Math.floor(meta.randomInjectCount) : 1;
+        owners.forEach(function (ow) {
+            var list = ow.outfits || [];
+            if (list.length <= randCount) return;
+            var sig = list.map(function (o) { return o.id; }).join(',') + '#' + randCount;
+            var cached = randomCache[ow.partKey];
+            if (cached && cached.sig === sig && cached.outfits.length > 0) {
+                ow.outfits = cached.outfits;
+                return;
+            }
+            ow.outfits = pickRandomOutfits(list, randCount);
+            randomCache[ow.partKey] = { sig: sig, outfits: ow.outfits };
+        });
+    } else {
+        randomCache = {};
+    }
 
     // ── 组装注入内容（v2 + 单品支持）──
     var allTextParts = [];

@@ -1464,7 +1464,7 @@ function openSettingsSheet() {
 
         '<div class="om-divider"></div>',
         '<div class="om-sec-title">随机注入 <span class="om-hint">（仅对通用衣柜生效）</span></div>',
-        '<div class="om-setting-row om-row-inline"><label>开启随机注入 <span class="om-hint">开启后，每次会话首次注入会从通用衣柜随机选取若干套穿搭，之后复用同一批</span></label><input type="checkbox" class="om-chk" id="om-random-inject"' + (d.randomInject ? ' checked' : '') + ' /></div>',
+        '<div class="om-setting-row om-row-inline"><label>开启随机注入 <span class="om-hint">对每个衣柜各自生效：每次会话首次注入时，从该衣柜的激活穿搭里随机选取若干套，之后复用同一批；激活列表变化才会重新抽</span></label><input type="checkbox" class="om-chk" id="om-random-inject"' + (d.randomInject ? ' checked' : '') + ' /></div>',
         '<div class="om-setting-row"><label>随机注入数量 <span class="om-hint">每次随机选取的穿搭套数</span></label><input type="number" id="om-random-inject-count" min="1" max="20" value="' + (d.randomInjectCount || 3) + '" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;font-family:inherit" /></div>',
 
         '<div class="om-divider"></div>',
