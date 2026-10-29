@@ -1,5 +1,5 @@
 // ══════════════════════════════════════════════════════════
-// 穿搭管理器 Outfit Manager v2.1.4
+// 穿搭管理器 Outfit Manager v2.6.0
 // by 温水 & 克洛宜
 // 存储分包架构 · meta + partition
 // ══════════════════════════════════════════════════════════
@@ -14,6 +14,8 @@ import { registerSheetsFn, createSheet, closeSheet, getAllTagSuggestions } from 
 import { registerBatchFn, initBatchDeps } from './src/ui-batch.js';
 import { injectFab, updateBtn, injectBtn, registerFabFn } from './src/ui-fab.js';
 import { activateRecovery, deactivateRecovery, injectRecoveryBtn } from './src/ui-recovery.js';
+import { injectActiveBtn, refreshIfOpen } from './src/ui-active.js';
+import { setupMessageTags } from './src/msg-tag.js';
 
 // ── 注册跨模块函数 ─────────────────────────────────────
 registerMainFn();
@@ -53,6 +55,12 @@ function startNormalUi() {
     setInterval(injectBtn, 2000);
     setTimeout(injectFab, 500);
     setInterval(injectFab, 3000);
+    setTimeout(injectActiveBtn, 400);
+    setInterval(injectActiveBtn, 2500);
+    setInterval(refreshIfOpen, 1500);
+
+    // 正文穿搭标记 <Outfit-Manager-Custom>…</Outfit-Manager-Custom> → 卡片行
+    setupMessageTags();
 
     updateBtn();
     preResolveActiveImages();
