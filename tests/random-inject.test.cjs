@@ -24,6 +24,8 @@ async function run() {
         _version: 2,
         mode: 'text',
         injectPosition: 'user',
+        // 本测试只关心随机切片，不测「跳过上一楼已发」，关掉避免干扰
+        skipSentOutfits: false,
         randomInject: true,
         randomInjectCount: 2,
         singleTemplate: '[User]\n{{description}}',

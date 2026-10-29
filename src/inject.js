@@ -122,21 +122,50 @@ function contentToText(c) {
     return '';
 }
 
-// 请求体里最后一条 assistant 消息的正文
-function lastAssistantText(p) {
-    if (!p || !Array.isArray(p.messages)) return '';
-    for (var i = p.messages.length - 1; i >= 0; i--) {
-        var m = p.messages[i];
-        if (m && m.role === 'assistant') return contentToText(m.content);
-    }
-    return '';
+// ── 上次注入记录：判断「上一楼末尾插件发的那段说明」里有没有这套穿搭 ──
+// 聊天身份：同一个聊天内才做去重，换聊天/换角色卡不串
+function chatScopeKey() {
+    try {
+        var ctx = (typeof SillyTavern !== 'undefined' && SillyTavern.getContext) ? SillyTavern.getContext() : null;
+        if (ctx) return String(ctx.chatId || '') + '|' + String(ctx.name2 || '');
+    } catch (e) {}
+    return 'default';
 }
 
-// 正文里是否提到了这套穿搭（名字太短容易误判，至少 3 个字才算）
-function outfitMentioned(text, o) {
-    var name = String((o && o.name) || '').trim();
-    if (name.length < 3) return false;
-    return text.indexOf(name) !== -1;
+// 取本聊天上一次注入的记录（其他聊天的忽略）
+function getLastInjected(meta) {
+    var last = meta && meta.lastInject;
+    if (!last || typeof last !== 'object') return null;
+    if (String(last.key || '') !== chatScopeKey()) return null;
+    return last;
+}
+
+// 记住这一轮实际发出去的穿搭与文字，供下一轮比对
+function rememberLastInjected(outfits, text) {
+    try {
+        var m = loadMeta();
+        m.lastInject = {
+            key: chatScopeKey(),
+            ids: (outfits || []).map(function (o) { return o.id; }),
+            names: (outfits || []).map(function (o) { return String((o && o.name) || ''); }),
+            text: String(text || '').slice(0, 8000),
+            ts: Date.now()
+        };
+        saveMeta(m);
+    } catch (e) {}
+}
+
+// 这套穿搭是不是已经出现在上一楼那段说明里
+function wasSentLastRound(last, o) {
+    if (!last || !o) return false;
+    if (Array.isArray(last.ids) && last.ids.length) return last.ids.indexOf(o.id) !== -1;
+    // 没记 id 时退化为比对原文（名字或整段标签）
+    var t = String(last.text || '');
+    if (!t) return false;
+    var name = String(o.name || '').trim();
+    if (name.length >= 3 && t.indexOf(name) !== -1) return true;
+    var tl = buildTagLine(o);
+    return !!(tl && t.indexOf(tl) !== -1);
 }
 
 // 从列表中随机抽取 n 项（Fisher-Yates 部分洗牌），返回新数组，不修改入参
@@ -537,26 +566,25 @@ function tryInjectPayload(p) {
 
     if (owners.length === 0) return null;
 
-    // ── 上一楼已经穿过的穿搭不再重复发送 ──
-    // 判定依据：请求体里最后一条 assistant 消息的正文是否提到了这套穿搭的名字
-    //（正文标记 <Outfit-Manager-Custom>名称/角色</...> 里也含名字，同样能命中）
+    // ── 上一楼末尾已经发过的那段穿搭说明，不再重复发送 ──
+    // 判定依据：插件自己记录的上一次注入（meta.lastInject：发出去的穿搭 id + 那段原文）
     if (meta.skipSentOutfits !== false) {
-        var lastText = lastAssistantText(p);
-        if (lastText) {
-            var before = 0, after = 0;
-            owners.forEach(function (ow) { before += (ow.outfits || []).length; });
-            var kept = [];
+        var lastInject = getLastInjected(meta);
+        if (lastInject) {
+            var beforeN = 0, afterN = 0;
+            owners.forEach(function (ow) { beforeN += (ow.outfits || []).length; });
+            var keptOwners = [];
             owners.forEach(function (ow) {
-                var list = (ow.outfits || []).filter(function (o) { return !outfitMentioned(lastText, o); });
-                after += list.length;
+                var list = (ow.outfits || []).filter(function (o) { return !wasSentLastRound(lastInject, o); });
+                afterN += list.length;
                 if (!list.length) return;
                 var copy = {};
                 for (var k in ow) copy[k] = ow[k];
                 copy.outfits = list;
-                kept.push(copy);
+                keptOwners.push(copy);
             });
-            // 全部都被判为「已穿过」时保留原样：宁可重复，也不能一条服装信息都不发
-            if (after > 0 && after < before) owners = kept;
+            // 全部都被判为「已经发过」时保留原样：宁可重复一次，也不能一条服装信息都不发
+            if (afterN > 0 && afterN < beforeN) owners = keptOwners;
         }
     }
 
@@ -653,6 +681,14 @@ function tryInjectPayload(p) {
     } else if (markerHint) {
         injectText(p, markerHint.replace(/^\n+/, ''), pos);
         injected = true;
+    }
+
+    if (injected) {
+        var sentOutfits = [];
+        owners.forEach(function (ow) {
+            (ow.outfits || []).forEach(function (o) { sentOutfits.push(o); });
+        });
+        rememberLastInjected(sentOutfits, mergedText || markerHint || '');
     }
 
     if (ownerImageGroups.length > 0) {
@@ -821,4 +857,4 @@ export function setupInjection() {
 }
 
 // 供测试使用：判断上一楼是否已经穿过某套穿搭
-export { lastAssistantText, outfitMentioned };
+export { getLastInjected, wasSentLastRound, chatScopeKey, rememberLastInjected };

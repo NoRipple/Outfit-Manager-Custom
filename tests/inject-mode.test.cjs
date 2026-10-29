@@ -209,46 +209,59 @@ async function run() {
     assert.equal(captured.indexOf('image_url'), -1, '学习：重发的请求体不应包含图片');
     assert.equal(meta.modelImageSupport['deepseek-v4.1-flash'], false, '学习：应记住该模型不接受图片');
 
-    // 跳过上一楼已穿：识别最后一条 AI 回复 + 判断穿搭是否被提到
+    // ── 跳过「上一楼末尾插件已经发过的穿搭」 ──
     const ns = mod.namespace;
-    assert.equal(ns.lastAssistantText({ messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: '我穿着测试穿搭出门了' }] }), '我穿着测试穿搭出门了', '跳过：应取最后一条 assistant 正文');
-    assert.equal(ns.lastAssistantText({ messages: [{ role: 'assistant', content: '第一楼' }, { role: 'user', content: '第二楼用户' }] }), '第一楼', '跳过：只看 assistant，用户消息不算');
-    assert.equal(ns.outfitMentioned('我穿着测试穿搭出门了', OUTFIT), true, '跳过：名字被提到应命中');
-    assert.equal(ns.outfitMentioned('她换上了另一件裙子', OUTFIT), false, '跳过：没提到不应命中');
-    assert.equal(ns.outfitMentioned('穿搭', OUTFIT), false, '跳过：名字太短（<3 字）不参与判断，避免误杀');
-    assert.equal(ns.outfitMentioned('', OUTFIT), false, '跳过：空正文不应命中');
+    const scope = ns.chatScopeKey();
+    assert.equal(typeof scope, 'string', '跳过：聊天身份应是字符串');
+    assert.equal(ns.wasSentLastRound({ key: scope, ids: ['o1'], text: '' }, OUTFIT), true, '跳过：id 命中应判为已发');
+    assert.equal(ns.wasSentLastRound({ key: scope, ids: ['o2'], text: '' }, OUTFIT), false, '跳过：id 不匹配应判为未发');
+    assert.equal(ns.wasSentLastRound({ key: scope, ids: [], text: '她穿着测试穿搭出门了' }, OUTFIT), true, '跳过：没记 id 时按原文名字命中');
+    assert.equal(ns.wasSentLastRound({ key: scope, ids: [], text: '她穿着别的衣服' }, OUTFIT), false, '跳过：原文没提到应判未发');
+    assert.equal(ns.wasSentLastRound(null, OUTFIT), false, '跳过：没有上次记录时不跳过');
 
-    // 跳过上一楼已穿（集成）：两套激活，上一楼提到 A → 只发 B
+    // 集成：两套激活，上一楼末尾那段已经发了穿搭 1 → 这一轮只发穿搭 2
     stubOutfits = [OUTFIT, OUTFIT2];
     meta.injectMode = 'tag_text';
     meta.skipSentOutfits = true;
+    meta.lastInject = { key: ns.chatScopeKey(), ids: ['o1'], names: ['测试穿搭'], text: '(穿搭1) 【场景：通勤】', ts: Date.now() };
     captured = null;
     await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
-        { role: 'user', content: '今天穿什么' },
-        { role: 'assistant', content: '她换上了测试穿搭就出门了。' },
-        { role: 'user', content: '继续' }
+        { role: 'user', content: '今天穿什么' }
     ] }) });
-    assert.ok(captured.indexOf('蓝色棉麻连衣裙') !== -1, '跳过：未被提到的穿搭应照常发送');
-    assert.equal(captured.indexOf('白色衬衫配米色长裤'), -1, '跳过：上一楼已提到的穿搭不应再发');
+    assert.ok(captured.indexOf('蓝色棉麻连衣裙') !== -1, '跳过：没发过的穿搭应照常发送');
+    assert.equal(captured.indexOf('白色衬衫配米色长裤'), -1, '跳过：上一楼已经发过的穿搭不应再发');
 
-    // 全部都被提到时保留，避免一条服装信息都没有
+    // 发完之后应该有新的记录（记录的是这一轮真正发出去的那套）
+    assert.ok(meta.lastInject && meta.lastInject.ids.indexOf('o2') !== -1, '跳过：应记录本轮实际发送的穿搭');
+
+    // 全部都发过 → 保留原样，避免一条服装信息都没有
+    meta.lastInject = { key: ns.chatScopeKey(), ids: ['o1', 'o2'], names: [], text: '', ts: Date.now() };
     captured = null;
     await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
-        { role: 'assistant', content: '她先穿测试穿搭，后来换了蓝色连衣裙。' },
         { role: 'user', content: '继续' }
     ] }) });
-    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1 && captured.indexOf('蓝色棉麻连衣裙') !== -1, '跳过：全被提到时应保留原样');
+    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1 && captured.indexOf('蓝色棉麻连衣裙') !== -1, '跳过：全发过时应保留原样');
+
+    // 换到别的聊天（chatId 不同）不跳过
+    meta.lastInject = { key: 'other-chat|Alice', ids: ['o1', 'o2'], names: [], text: '', ts: Date.now() };
+    captured = null;
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
+        { role: 'user', content: '继续' }
+    ] }) });
+    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1, '跳过：换聊天后应重新发送');
 
     // 开关关闭时不做跳过
     meta.skipSentOutfits = false;
+    meta.lastInject = { key: ns.chatScopeKey(), ids: ['o1'], names: [], text: '', ts: Date.now() };
     captured = null;
     await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
-        { role: 'assistant', content: '她换上了测试穿搭就出门了。' },
         { role: 'user', content: '继续' }
     ] }) });
-    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1, '跳过关闭：已提到也照常发送');
+    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1, '跳过关闭：已发过也照常发送');
+
     stubOutfits = [OUTFIT];
     meta.skipSentOutfits = true;
+    meta.lastInject = null;
 
     console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示 / 多模态照常带图 / 已学习跳过 / never 策略 / 拒绝后自动重发)');
 }
