@@ -77,6 +77,7 @@ function ensureWindow() {
     el.innerHTML =
         '<div class="om-act-head">' +
             '<span class="om-act-title"><i class="fa-solid fa-shirt"></i><span class="om-act-title-txt"> 当前生效穿搭</span></span>' +
+            '<span class="om-act-ownerbar" id="om-act-ownerbar"></span>' +
             '<span class="om-act-count" id="om-act-count"></span>' +
             '<button class="om-act-close" id="om-act-close" title="关闭"><i class="fa-solid fa-xmark"></i></button>' +
         '</div>' +
@@ -84,6 +85,11 @@ function ensureWindow() {
     document.body.appendChild(el);
     el.querySelector('#om-act-close').addEventListener('click', closeWindow);
     return el;
+}
+
+function wornOwnerSuffix(owner) {
+    if (!owner || owner === _uniformOwner) return '';
+    return ' · ' + owner;
 }
 
 function tagLineText(o) {
@@ -96,21 +102,25 @@ function tagLineText(o) {
     return out.join(' ｜ ');
 }
 
+var _uniformOwner = '';
+
 function cardHtml(item, idx) {
     var o = item.outfit;
     var imgs = getOutfitImages(o);
     var thumb = getOutfitThumb(o) || imgs[0] || '';
     var tagText = tagLineText(o);
     var worn = getWorn()[o.id];
+    var num = ('0' + (idx + 1)).slice(-2);
     return '<div class="om-act-card' + (worn ? ' om-act-card-worn' : '') + '" data-idx="' + idx + '">' +
-        '<div class="om-act-thumb">' +
-            (thumb ? '<img src="' + esc(thumb) + '" alt="" loading="lazy" />' : '<span class="om-act-noimg"><i class="fa-solid fa-shirt"></i></span>') +
-            (worn ? '<span class="om-act-wornmark"><i class="fa-solid fa-check"></i></span>' : '') +
-        '</div>' +
+        (thumb
+            ? '<img class="om-act-pic" src="' + esc(thumb) + '" alt="" loading="lazy" />'
+            : '<span class="om-act-noimg"><i class="fa-solid fa-shirt"></i></span>') +
+        '<span class="om-act-idx">' + num + '</span>' +
+        (worn ? '<span class="om-act-wornmark"><i class="fa-solid fa-check"></i></span>' : '') +
         '<div class="om-act-info">' +
-            (worn ? '<div class="om-act-worn"><i class="fa-solid fa-shirt"></i> 本楼穿着 · ' + esc(worn.owner || item.owner) + '</div>' : '') +
-            '<div class="om-act-owner" title="' + esc(item.owner) + '">' + esc(item.owner) + '</div>' +
-            '<div class="om-act-name" title="' + esc(o.name || '') + '">' + esc(o.name || '未命名穿搭') + '</div>' +
+            (worn ? '<div class="om-act-worn"><i class="fa-solid fa-shirt"></i> 本楼穿着' + (wornOwnerSuffix(worn.owner || item.owner)) + '</div>' : '') +
+            (item.owner === _uniformOwner ? '' : '<div class="om-act-owner">' + esc(item.owner) + '</div>') +
+            '<div class="om-act-name">' + esc(o.name || '未命名穿搭') + '</div>' +
             (tagText ? '<div class="om-act-tags">' + esc(tagText) + '</div>' : '') +
         '</div>' +
     '</div>';
@@ -131,6 +141,17 @@ function renderBody() {
         var wb = wornMap[b.outfit.id] ? 1 : 0;
         return wb - wa;
     });
+    // 同一个衣柜的多套穿搭：衣柜名只在标题栏显示一次，卡片里不再重复
+    var owners = {};
+    items.forEach(function (it) { owners[it.owner] = 1; });
+    var ownerKeys = Object.keys(owners);
+    _uniformOwner = ownerKeys.length === 1 ? ownerKeys[0] : '';
+    var ownerBar = el.querySelector('#om-act-ownerbar');
+    if (ownerBar) {
+        ownerBar.textContent = _uniformOwner || '';
+        ownerBar.title = _uniformOwner || '';
+        ownerBar.style.display = _uniformOwner ? '' : 'none';
+    }
     _lastItems = items;
     _lastSig = items.map(function (it) { return it.outfit.id; }).join(',');
     if (countEl) countEl.textContent = items.length ? (_sentFiltered ? '本轮 ' + items.length + ' 套' : '共 ' + items.length + ' 套') : '';
@@ -161,9 +182,9 @@ function fitToChat() {
         if (r.width > 0) leftLimit = r.left;
     }
     var avail = leftLimit > 0 ? leftLimit - 24 : (window.innerWidth - 300);
-    if (avail >= 210) {
+    if (avail >= 330) {
         el.classList.remove('om-act-compact');
-        el.style.width = Math.min(272, avail) + 'px';
+        el.style.width = Math.min(408, avail) + 'px';
     } else {
         el.classList.add('om-act-compact');
         el.style.width = '';
