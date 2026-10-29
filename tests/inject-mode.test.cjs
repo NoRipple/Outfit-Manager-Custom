@@ -134,6 +134,9 @@ async function run() {
         return captured;
     }
 
+    // 前面的模式测试只关心注入内容，先关掉「跳过已发」避免互相干扰
+    meta.skipSentOutfits = false;
+
     // ── 仅标签 ──
     const onlyTag = await injectOnce('tag', 'A');
     assert.ok(onlyTag.indexOf('【场景：通勤】') !== -1, '仅标签：应包含场景标签');
@@ -234,13 +237,14 @@ async function run() {
     // 发完之后应该有新的记录（记录的是这一轮真正发出去的那套）
     assert.ok(meta.lastInject && meta.lastInject.ids.indexOf('o2') !== -1, '跳过：应记录本轮实际发送的穿搭');
 
-    // 全部都发过 → 保留原样，避免一条服装信息都没有
+    // 全部都发过 → 一条都不发（请求体保持原样）
     meta.lastInject = { key: ns.chatScopeKey(), ids: ['o1', 'o2'], names: [], text: '', ts: Date.now() };
+    const plainBody = JSON.stringify({ messages: [{ role: 'user', content: '继续' }] });
     captured = null;
-    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
-        { role: 'user', content: '继续' }
-    ] }) });
-    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1 && captured.indexOf('蓝色棉麻连衣裙') !== -1, '跳过：全发过时应保留原样');
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: plainBody });
+    assert.equal(captured, plainBody, '跳过：全发过时不应注入任何穿搭');
+    assert.equal(captured.indexOf('白色衬衫配米色长裤'), -1, '跳过：全发过时不应出现穿搭 1');
+    assert.equal(captured.indexOf('蓝色棉麻连衣裙'), -1, '跳过：全发过时不应出现穿搭 2');
 
     // 换到别的聊天（chatId 不同）不跳过
     meta.lastInject = { key: 'other-chat|Alice', ids: ['o1', 'o2'], names: [], text: '', ts: Date.now() };
@@ -260,7 +264,7 @@ async function run() {
     assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1, '跳过关闭：已发过也照常发送');
 
     stubOutfits = [OUTFIT];
-    meta.skipSentOutfits = true;
+    meta.skipSentOutfits = false;
     meta.lastInject = null;
 
     console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示 / 多模态照常带图 / 已学习跳过 / never 策略 / 拒绝后自动重发)');

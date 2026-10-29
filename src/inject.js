@@ -583,10 +583,13 @@ function tryInjectPayload(p) {
                 copy.outfits = list;
                 keptOwners.push(copy);
             });
-            // 全部都被判为「已经发过」时保留原样：宁可重复一次，也不能一条服装信息都不发
-            if (afterN > 0 && afterN < beforeN) owners = keptOwners;
+            // 全部都已经发过 → 这一轮一条都不发（上一楼那段说明还在上下文里，AI 依然知道穿着什么）
+            owners = keptOwners;
         }
     }
+
+    // 过滤后没有可发的穿搭：直接不注入
+    if (owners.length === 0) return false;
 
     // ── 组装注入内容（v2 + 单品支持）──
     var allTextParts = [];

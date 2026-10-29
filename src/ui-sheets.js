@@ -1454,7 +1454,7 @@ function openSettingsSheet() {
             '<textarea id="om-marker-tpl" rows="6" style="width:100%;resize:vertical;font-family:inherit;font-size:.86em;line-height:1.5">' + esc(d.markerTemplate || MARKER_TEMPLATE_DEFAULT) + '</textarea>' +
             '<div class="om-frow" style="margin-top:6px"><button class="om-btn om-btn-outline" id="om-marker-tpl-reset">恢复默认</button></div>' +
         '</div>',
-        '<div class="om-setting-row om-row-inline"><label>跳过上一楼已发的穿搭 <span class="om-hint">发送前先对比「上一楼末尾插件发的穿搭说明」：那里面已经出现过的穿搭，这一轮不再重复发送（省 token、避免重复描写）。全部都出现过时仍照常发送，避免一条服装信息都没有</span></label><input type="checkbox" class="om-chk" id="om-skip-sent"' + (d.skipSentOutfits !== false ? ' checked' : '') + ' /></div>',
+        '<div class="om-setting-row om-row-inline"><label>跳过上一楼已发的穿搭 <span class="om-hint">发送前先对比「上一楼末尾插件发的穿搭说明」：那里面已经出现过的穿搭，这一轮不再重复发送（省 token、避免重复描写）。全部都出现过时这一轮就不发穿搭说明</span></label><input type="checkbox" class="om-chk" id="om-skip-sent"' + (d.skipSentOutfits !== false ? ' checked' : '') + ' /></div>',
 
         '<div class="om-setting-row"><label>注入位置 <span class="om-hint">Gemini/DeepSeek 建议选\"用户消息\"</span></label><select id="om-inject-pos">',
         '<option value="system"' + (d.injectPosition === 'system' ? ' selected' : '') + '>系统提示末尾</option>',
