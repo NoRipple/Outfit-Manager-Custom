@@ -105,6 +105,11 @@ async function run() {
     assert.ok(meta.apiVision.prompt.indexOf('"scene"') !== -1);
     assert.ok(meta.apiVision.prompt.indexOf('"garment"') !== -1);
     assert.ok(meta.apiVision.prompt.indexOf('"impression"') !== -1);
+    // 独立的标签分析 prompt
+    assert.ok(meta.apiVision.tagPrompt, '默认必须有 tagPrompt');
+    ['scene', 'garment', 'impression'].forEach(function (g) {
+        assert.ok(meta.apiVision.tagPrompt.indexOf(g) !== -1, 'tagPrompt 必须提到 ' + g);
+    });
 
     const oldCfg = { prompt: D.LEGACY_VISION_PROMPT };
     D.upgradeLegacyVisionPrompt(oldCfg);

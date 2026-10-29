@@ -1805,7 +1805,7 @@ function validateMetaPayload(data) {
         typeof data.fabPos.top !== 'number' || !Number.isFinite(data.fabPos.top) || typeof data.fabPos.left !== 'number' || !Number.isFinite(data.fabPos.left))) return 'meta.fabPos 类型无效';
     if (data.apiVision !== undefined && (!data.apiVision || typeof data.apiVision !== 'object' || Array.isArray(data.apiVision))) return 'meta.apiVision 类型无效';
     if (data.apiVision && typeof data.apiVision === 'object' && !Array.isArray(data.apiVision)) {
-        var visionStrings = ['endpoint', 'key', 'model', 'prompt', 'accPrompt'];
+        var visionStrings = ['endpoint', 'key', 'model', 'prompt', 'accPrompt', 'tagPrompt'];
         for (var visionIndex = 0; visionIndex < visionStrings.length; visionIndex++) {
             if (data.apiVision[visionStrings[visionIndex]] !== undefined && typeof data.apiVision[visionStrings[visionIndex]] !== 'string') return 'meta.apiVision.' + visionStrings[visionIndex] + ' 类型无效';
         }

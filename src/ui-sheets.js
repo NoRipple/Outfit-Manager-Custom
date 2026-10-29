@@ -4,7 +4,7 @@
 import { load, save, loadMeta, saveMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, syncActivePartitions, charNameById, isServerMode, uploadImage } from './db.js';
 import { def, getCharData, getViewOutfits, getViewCategories, getViewActiveIds, setViewActiveIds, getById, getViewById, isActive, getCatNames, getSubCats, findCatObj, hasSubCats, partGetById, partIsActive, partGetAccById, cleanAccIdFromKits, getActiveKit, getKitAccessories, ensureOutfitKits, getOutfitImages, getOutfitPrimaryImage, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, emptyTags, getOutfitTags, setOutfitTags, normalizeTagList, collectTagsByGroup } from './data.js';
 import { genId, esc, toast, getPopupLayer, compressImage } from './utils.js';
-import { generateSingleDescription, generateSingleAccDescription, batchGenerateDescriptions, openModelPicker, normalizeEndpoint } from './api.js';
+import { generateSingleDescription, generateSingleAccDescription, generateSingleTags, batchGenerateDescriptions, openModelPicker, normalizeEndpoint } from './api.js';
 import { state, fn } from './bridge.js';
 
 function isImageFile(file) {
@@ -60,6 +60,7 @@ function openContextMenu(outfit, imgOutfits) {
         '<div class="om-ctx-item" id="om-ctx-edit"><i class="fa-solid fa-pen"></i>编辑</div>',
         '<div class="om-ctx-item" id="om-ctx-move"><i class="fa-solid fa-arrow-right-arrow-left"></i>移动到…</div>',
         getOutfitImages(outfit).length > 0 ? '<div class="om-ctx-item" id="om-ctx-aidesc"><i class="fa-solid fa-wand-magic-sparkles"></i>AI 生成描述</div>' : '',
+        '<div class="om-ctx-item" id="om-ctx-aitags"><i class="fa-solid fa-tags"></i>AI 生成标签</div>',
         '<div class="om-ctx-item danger" id="om-ctx-del"><i class="fa-solid fa-trash"></i>删除</div>',
     ].join(''));
 
@@ -156,9 +157,29 @@ function openContextMenu(outfit, imgOutfits) {
             if (o) {
                 if (result.description) o.description = result.description;
                 if (result.name && result.name.trim()) o.name = result.name.trim();
+                if (result.tags) setOutfitTags(o, result.tags);
                 saveCurrent(curP);
             }
             toast('✅ 已生成：' + (o ? o.name : outfit.name));
+            fn.renderGrid();
+        });
+    });
+
+    var aitagsEl = sheet.querySelector('#om-ctx-aitags');
+    if (aitagsEl) aitagsEl.addEventListener('click', function () {
+        var m = loadMeta();
+        if (!m.apiVision.endpoint || !m.apiVision.key || !m.apiVision.model) {
+            toast('请先在设置中配置"描述生成 API"', true); closeSheet(sheet); return;
+        }
+        aitagsEl.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i>分析中...';
+        aitagsEl.style.pointerEvents = 'none';
+        generateSingleTags(outfit, function (err, tags) {
+            closeSheet(sheet);
+            if (err) { toast('生成失败：' + err, true); return; }
+            var curP = loadCurrent();
+            var o = partGetById(curP, outfit.id);
+            if (o) { setOutfitTags(o, tags); saveCurrent(curP); }
+            toast('✅ 已生成标签：' + (o ? o.name : outfit.name));
             fn.renderGrid();
         });
     });
@@ -590,7 +611,10 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
         '<button class="om-btn om-btn-outline" id="om-daidesc" style="font-size:.78em;margin-top:5px;align-self:flex-start"><i class="fa-solid fa-wand-magic-sparkles"></i> AI 生成描述</button></div>',
         '<div class="om-field"><label>标签 <span class="om-hint">三组都能多选；智能注入和 AI 选穿搭都靠它</span></label>',
         '<div class="om-tageditor" id="om-tageditor">' + buildTagEditorHtml(outfit) + '</div>',
-        '<button class="om-btn om-btn-outline" id="om-tag-expand" style="font-size:.78em;margin-top:6px;align-self:flex-start"><i class="fa-solid fa-tags"></i> 标签管理</button>',
+        '<div class="om-frow" style="margin-top:6px;gap:6px">' +
+        '<button class="om-btn om-btn-outline" id="om-daitags" style="font-size:.78em"><i class="fa-solid fa-wand-magic-sparkles"></i> AI 生成标签</button>' +
+        '<button class="om-btn om-btn-outline" id="om-tag-expand" style="font-size:.78em"><i class="fa-solid fa-tags"></i> 标签管理</button>' +
+        '</div>',
         '</div>',
         '<div class="om-field"><label>参考图片 <span class="om-hint">可选，自动压缩，可多张</span></label>',
         '<div class="om-imgarea om-imgs" id="om-dimgarea">' + imageAreaHtml + '</div>',
@@ -862,6 +886,29 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
             var nameInp = sheet.querySelector('#om-dn');
             if (result.name && (!nameInp.value.trim() || nameInp.value.trim() === '穿搭')) nameInp.value = result.name;
             toast('✅ 已生成');
+        });
+    });
+
+    // AI 生成标签按钮（只出标签，不改描述）
+    sheet.querySelector('#om-daitags').addEventListener('click', function () {
+        var dd = load();
+        if (!dd.apiVision.endpoint || !dd.apiVision.key || !dd.apiVision.model) { toast('请先在设置中配置"描述生成 API"', true); return; }
+        var btn = sheet.querySelector('#om-daitags');
+        btn.disabled = true; btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 分析中...';
+        var subSel = sheet.querySelector('#om-dsubcat');
+        var tmpOutfit = {
+            name: sheet.querySelector('#om-dn').value || '',
+            category: sheet.querySelector('#om-dcat').value || '',
+            subCategory: subSel ? (subSel.value || '') : '',
+            description: sheet.querySelector('#om-ddesc').value || '',
+            tags: tagEditor.get(),
+            imageData: editImgs[0] || null
+        };
+        generateSingleTags(tmpOutfit, function (err, tags) {
+            btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> AI 生成标签';
+            if (err) { toast('生成失败：' + err, true); return; }
+            tagEditor.set(tags);
+            toast('✅ 标签已生成');
         });
     });
 
@@ -1178,6 +1225,7 @@ function openSettingsSheet() {
         '<div class="om-setting-row"><label>模型名称</label><div style="display:flex;gap:6px;align-items:center"><input type="text" id="om-api-v-model" placeholder="gpt-4o / gemini-2.0-flash / claude-sonnet-4-20250514" value="' + esc(d.apiVision.model) + '" style="flex:1;background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;box-sizing:border-box;font-family:inherit" /><button class="om-btn om-btn-outline" id="om-api-v-model-fetch" style="font-size:.75em;white-space:nowrap;padding:7px 10px;flex-shrink:0"><i class="fa-solid fa-rotate"></i> 拉取</button></div></div>',
         '<div class="om-setting-row"><label>描述生成 Prompt</label><textarea id="om-api-v-prompt" rows="3" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;resize:vertical;font-family:inherit">' + esc(d.apiVision.prompt) + '</textarea></div>',
         '<div class="om-setting-row"><label>单品描述 Prompt <span class="om-hint">{{accCategory}} = 单品分类名</span></label><textarea id="om-api-v-acc-prompt" rows="3" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;resize:vertical;font-family:inherit">' + esc(d.apiVision.accPrompt || '') + '</textarea></div>',
+        '<div class="om-setting-row"><label>标签分析 Prompt <span class="om-hint">决定三个大类里放什么词、怎么放</span></label><textarea id="om-api-v-tag-prompt" rows="5" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;resize:vertical;font-family:inherit">' + esc(d.apiVision.tagPrompt || '') + '</textarea></div>',
         '<div class="om-setting-row"><label>Prompt 模板</label><select id="om-api-v-template" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;font-family:inherit">' + buildPromptTemplateOptions(d.apiVision) + '</select></div>',
         '<div class="om-btn-row" style="margin-top:6px"><button class="om-btn om-btn-outline" id="om-api-v-template-save" style="font-size:.78em;flex:1 1 110px"><i class="fa-solid fa-floppy-disk"></i> 保存当前</button><button class="om-btn om-btn-outline" id="om-api-v-template-ren" style="font-size:.78em;flex:1 1 90px"><i class="fa-solid fa-pen"></i> 重命名</button><button class="om-btn om-btn-outline" id="om-api-v-template-del" style="font-size:.78em;flex:1 1 90px"><i class="fa-solid fa-trash"></i> 删除</button></div>',
         '<div class="om-setting-row om-row-inline"><label>覆盖已有描述</label><input type="checkbox" class="om-chk" id="om-api-v-overwrite"' + (d.apiVision.overwrite ? ' checked' : '') + ' /></div>',
@@ -1256,6 +1304,7 @@ function openSettingsSheet() {
     sheet.querySelector('#om-api-v-model').addEventListener('input', function () { var m = loadMeta(); m.apiVision.model = this.value.trim(); saveMeta(m); });
     sheet.querySelector('#om-api-v-prompt').addEventListener('input', function () { var m = loadMeta(); m.apiVision.prompt = this.value; saveMeta(m); });
     sheet.querySelector('#om-api-v-acc-prompt').addEventListener('input', function () { var m = loadMeta(); m.apiVision.accPrompt = this.value; saveMeta(m); });
+    sheet.querySelector('#om-api-v-tag-prompt').addEventListener('input', function () { var m = loadMeta(); m.apiVision.tagPrompt = this.value; saveMeta(m); });
     sheet.querySelector('#om-api-v-overwrite').addEventListener('change', function () { var m = loadMeta(); m.apiVision.overwrite = this.checked; saveMeta(m); });
 
     function refreshPromptTemplateSelect() {
@@ -1278,10 +1327,12 @@ function openSettingsSheet() {
         if (!tpl) { toast('模板不存在', true); refreshPromptTemplateSelect(); return; }
         m.apiVision.prompt = tpl.prompt || '';
         m.apiVision.accPrompt = tpl.accPrompt || '';
+        if (tpl.tagPrompt) m.apiVision.tagPrompt = tpl.tagPrompt;
         m.apiVision.activePromptTemplateId = tpl.id;
         saveMeta(m);
         sheet.querySelector('#om-api-v-prompt').value = m.apiVision.prompt;
         sheet.querySelector('#om-api-v-acc-prompt').value = m.apiVision.accPrompt;
+        sheet.querySelector('#om-api-v-tag-prompt').value = m.apiVision.tagPrompt || '';
         toast('已切换到模板「' + (tpl.name || '未命名模板') + '」');
     });
     sheet.querySelector('#om-api-v-template-save').addEventListener('click', function () {
@@ -1294,10 +1345,12 @@ function openSettingsSheet() {
             id: 'pt_' + genId(),
             name: name.trim(),
             prompt: sheet.querySelector('#om-api-v-prompt').value,
-            accPrompt: sheet.querySelector('#om-api-v-acc-prompt').value
+            accPrompt: sheet.querySelector('#om-api-v-acc-prompt').value,
+            tagPrompt: sheet.querySelector('#om-api-v-tag-prompt').value
         };
         m.apiVision.prompt = tpl.prompt;
         m.apiVision.accPrompt = tpl.accPrompt;
+        m.apiVision.tagPrompt = tpl.tagPrompt;
         m.apiVision.promptTemplates.push(tpl);
         m.apiVision.activePromptTemplateId = tpl.id;
         saveMeta(m);

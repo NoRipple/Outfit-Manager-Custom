@@ -2,7 +2,7 @@
 // Vision API、模型选择、批量描述生成
 
 import { load, save, loadMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, resolveImageForExternal } from './db.js';
-import { getById, partGetById, partGetAccById, normalizeTags, TAG_GROUP_KEYS, TAG_GROUPS, setOutfitTags, outfitHasTags } from './data.js';
+import { getById, partGetById, partGetAccById, normalizeTags, TAG_GROUP_KEYS, TAG_GROUPS, TAG_PROMPT_DEFAULT, setOutfitTags, outfitHasTags } from './data.js';
 import { toast, getPopupLayer, esc } from './utils.js';
 
 // ── 标签生成指令（追加在用户 prompt 之后，用户改 prompt 也不会丢）──
@@ -270,16 +270,16 @@ function validateClassificationResult(parsed, categories, fallback) {
 // ── 单次 Vision API 调用 ─────────────────────────────────
 export function callVisionAPI(apiCfg, image, systemPrompt, cb) {
     var url = normalizeEndpoint(apiCfg.endpoint, '/v1/chat/completions');
-    var imgContent = image.dataUrl.indexOf('data:') === 0 ? image.dataUrl : 'data:image/jpeg;base64,' + image.dataUrl;
+    // image 传 null 时走纯文本请求（标签分析可以只靠名称和描述）
+    var content = [];
+    if (image && image.dataUrl) {
+        var imgContent = image.dataUrl.indexOf('data:') === 0 ? image.dataUrl : 'data:image/jpeg;base64,' + image.dataUrl;
+        content.push({ type: 'image_url', image_url: { url: imgContent } });
+    }
+    content.push({ type: 'text', text: systemPrompt || '请描述图中服装' });
     var body = {
         model: apiCfg.model,
-        messages: [{
-            role: 'user',
-            content: [
-                { type: 'image_url', image_url: { url: imgContent } },
-                { type: 'text', text: systemPrompt || '请描述图中服装' }
-            ]
-        }],
+        messages: [{ role: 'user', content: content }],
         max_tokens: 4096
     };
     fetch(url, {
@@ -623,4 +623,107 @@ export function generateSingleAccDescription(acc, cb) {
             }
         });
     });
+}
+
+// ══ 标签分析（独立接口：只产出 tags，不动描述）═══════════
+
+// 当前生效的标签分析提示词（设置里可改，留空用默认）
+function getTagPrompt() {
+    var m = loadMeta();
+    var p = (m && m.apiVision && m.apiVision.tagPrompt) || '';
+    return p.trim() ? p : TAG_PROMPT_DEFAULT;
+}
+
+// 拼给 AI 的穿搭上下文
+function buildTagContext(outfit) {
+    var lines = [];
+    if (outfit.name) lines.push('穿搭名称：' + outfit.name);
+    var cat = [outfit.category, outfit.subCategory].filter(Boolean).join(' / ');
+    if (cat) lines.push('分类：' + cat);
+    if (outfit.description) lines.push('描述：' + outfit.description);
+    var cur = normalizeTags(outfit.tags);
+    var curText = TAG_GROUP_KEYS.map(function (k) { return k + '：' + (cur[k].length ? cur[k].join('、') : '无'); }).join('；');
+    lines.push('已有标签（可参考，也可补充或纠正）：' + curText);
+    return lines.join('\n');
+}
+
+// 从 AI 回复里抠出 tags（容忍只返回 {"scene":..} 的写法）
+function parseTagsOnly(text) {
+    if (!text || !String(text).trim()) return null;
+    var parsed = parseAIResponse(text);
+    if (parsed && parsed.tags) return normalizeTags(parsed.tags);
+    var s = String(text).trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
+    try {
+        var o = JSON.parse(s);
+        if (o && o.tags) return normalizeTags(o.tags);
+        if (o && (o.scene || o.garment || o.impression)) return normalizeTags(o);
+    } catch (e) { }
+    return null;
+}
+
+// ── 单套标签生成 ──────────────────────────────────────
+export function generateSingleTags(outfit, cb) {
+    var meta = loadMeta();
+    var apiCfg = meta.apiVision;
+    if (!apiCfg.endpoint || !apiCfg.key || !apiCfg.model) { cb('请先在设置中配置描述API'); return; }
+    var prompt = getTagPrompt() + '\n\n【待分析穿搭】\n' + buildTagContext(outfit);
+    function run(image) {
+        callVisionAPI(apiCfg, image, prompt, function (err, text) {
+            if (err) { cb(err); return; }
+            var tags = parseTagsOnly(text);
+            if (!tags) { cb('AI 返回的内容里没有解析出标签'); return; }
+            cb(null, tags);
+        });
+    }
+    if (outfit.imageData) {
+        resolveImageForExternal(outfit.imageData, function (resolvedUrl) { run({ name: outfit.name || '', dataUrl: resolvedUrl }); });
+    } else {
+        run(null);
+    }
+}
+
+// ── 批量标签生成 ──────────────────────────────────────
+export function batchGenerateTags(outfitIds, options, progressCb, doneCb) {
+    var meta = loadMeta();
+    var apiCfg = meta.apiVision;
+    if (!apiCfg.endpoint || !apiCfg.key || !apiCfg.model) { doneCb('请先在设置中配置描述API'); return; }
+    options = options || {};
+    var sourcePartKey = currentPartKey();
+    var snapshot = loadPartition(sourcePartKey);
+    var queue = [];
+    (outfitIds || []).forEach(function (id) {
+        var o = partGetById(snapshot, id);
+        if (!o) return;
+        if (options.skipTagged && outfitHasTags(o)) return;
+        queue.push({ id: id, name: o.name || '' });
+    });
+    var total = queue.length;
+    if (!total) { doneCb(null, 0, [], { target: 0, success: 0 }); return; }
+    var stats = { target: total, success: 0 };
+    var errors = [];
+    var done = 0, idx = 0;
+    var CONCURRENCY = 2;
+    function processNext() {
+        if (idx >= queue.length) return;
+        var item = queue[idx]; idx++;
+        var cur = partGetById(loadPartition(sourcePartKey), item.id);
+        if (!cur) {
+            done++;
+            if (progressCb) progressCb(done, total, '❌ ' + item.name);
+            if (done >= total) doneCb(null, done, errors, stats); else processNext();
+            return;
+        }
+        generateSingleTags(cur, function (err, tags) {
+            if (err) { errors.push({ name: item.name, error: err }); }
+            else {
+                var cp = loadPartition(sourcePartKey);
+                var o = partGetById(cp, item.id);
+                if (o) { applyParsedTags(o, tags, options.overwrite); savePartition(sourcePartKey, cp); stats.success++; }
+            }
+            done++;
+            if (progressCb) progressCb(done, total, err ? '❌ ' + item.name : '✅ ' + item.name);
+            if (done >= total) doneCb(null, done, errors, stats); else processNext();
+        });
+    }
+    for (var c = 0; c < Math.min(CONCURRENCY, total); c++) processNext();
 }

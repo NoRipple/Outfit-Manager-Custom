@@ -14,6 +14,19 @@ export var SHARED_CHAR_LABEL = '通用衣柜';
 export var VISION_PROMPT_DEFAULT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字","tags":{"scene":["场景"],"garment":["单品"],"impression":["气质"]}}';
 export var LEGACY_VISION_PROMPT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字"}';
 
+// ── 标签分析 Prompt 默认值（独立接口，只产出 tags）──
+// 用户可自行修改：往三个大类里塞什么词、怎么塞，都由这个提示词规定。
+export var TAG_PROMPT_DEFAULT = [
+    '你在给一套服装穿搭打标签。用户会给出穿搭名称、描述（可能还有图片、分类和已有标签）。',
+    '只输出 JSON，不要代码块，不要解释，格式：',
+    '{"tags":{"scene":[],"garment":[],"impression":[]}}',
+    '三组的含义：',
+    '- scene：场景/时机，例如 通勤、约会、雨天、居家、睡前、运动、宴会',
+    '- garment：主要单品，例如 衬衫、百褶裙、风衣、高跟鞋、针织衫',
+    '- impression：气质观感，例如 清纯、干练、性感、慵懒、甜美、帅气',
+    '每组 1-4 个词，每个词 2-6 个汉字，只写词不写整句；某一组确实判断不出来就给空数组。'
+].join('\n');
+
 // 旧默认 prompt 自动升级（用户自定义过的 prompt 不动）
 export function upgradeLegacyVisionPrompt(apiVision) {
     if (!apiVision || typeof apiVision !== 'object') return apiVision;
@@ -67,6 +80,7 @@ export function defMeta() {
             endpoint: '', key: '', model: '',
             prompt: VISION_PROMPT_DEFAULT,
             accPrompt: '用JSON回复（不要代码块）：{"name":"单品名称6字以内","description":"只描述图中的【{{accCategory}}】这一件单品，详细描述它的材质、颜色、款式、细节特征，不要描述其他服饰或整体穿搭，80-150字"}',
+            tagPrompt: TAG_PROMPT_DEFAULT,
             promptTemplates: [],
             activePromptTemplateId: null,
             overwrite: false

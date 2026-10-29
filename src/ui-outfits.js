@@ -20,7 +20,7 @@ import {
     SHARED_CHAR_KEY
 } from './data.js';
 import { esc, toast, getPopupLayer, uniqueIds } from './utils.js';
-import { batchClassifyOutfits } from './api.js';
+import { batchClassifyOutfits, batchGenerateTags } from './api.js';
 import { state, fn } from './bridge.js';
 
 var detailPanelOpen = false;
@@ -386,6 +386,7 @@ export function renderOutfitGrid(area, part) {
                 '<button class="om-batch-btn" id="om-batch-move"><i class="fa-solid fa-arrow-right-arrow-left"></i> 移动</button>' +
                 '<button class="om-batch-btn" id="om-batch-tag"><i class="fa-solid fa-tag"></i> 标签</button>' +
                 '<button class="om-batch-btn" id="om-batch-aidesc"><i class="fa-solid fa-wand-magic-sparkles"></i> AI描述</button>' +
+                '<button class="om-batch-btn" id="om-batch-aitags"><i class="fa-solid fa-tags"></i> AI标签</button>' +
                 '<button class="om-batch-btn danger" id="om-batch-del"><i class="fa-solid fa-trash"></i> 删除</button>' +
                 '</div></div>';
         } else {
@@ -591,6 +592,30 @@ export function renderOutfitGrid(area, part) {
             var hasImg = state.batchSelected.some(function (id) { var o = partGetById(curP, id); return o && o.imageData; });
             if (!hasImg) { toast('所选穿搭中没有带图片的', true); return; }
             fn.openBatchDescModal(state.batchSelected.slice());
+        });
+
+        // 批量 AI 标签（只分析标签，不改描述）
+        var baitagsBtn = batchArea.querySelector('#om-batch-aitags');
+        if (baitagsBtn) baitagsBtn.addEventListener('click', function () {
+            if (state.batchSelected.length === 0) { toast('请先选择穿搭', true); return; }
+            var m = loadMeta();
+            if (!m.apiVision.endpoint || !m.apiVision.key || !m.apiVision.model) {
+                toast('请先在设置中配置"描述生成 API"', true); return;
+            }
+            var ids = state.batchSelected.slice();
+            var btn = baitagsBtn;
+            btn.disabled = true;
+            btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 0/' + ids.length;
+            toast('开始分析标签：' + ids.length + ' 套');
+            batchGenerateTags(ids, { overwrite: false }, function (done, total) {
+                btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> ' + done + '/' + total;
+            }, function (err, done, errors, stats) {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fa-solid fa-tags"></i> AI标签';
+                if (err) { toast('生成失败：' + err, true); return; }
+                fn.renderGrid();
+                toast('✅ 标签完成：成功 ' + stats.success + ' / ' + stats.target + (errors.length ? '，失败 ' + errors.length : ''));
+            });
         });
 
         area.querySelectorAll('.om-card').forEach(function (card) {
