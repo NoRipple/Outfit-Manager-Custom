@@ -294,6 +294,13 @@ export function getOutfitImageCount(o) {
     return getOutfitImages(o).length;
 }
 
+// 列表缩略图：优先 o.thumb（图库导入时生成的小图），没有就返回 null 由调用方回退原图
+export function getOutfitThumb(o) {
+    if (!o) return null;
+    var t = typeof o.thumb === 'string' ? o.thumb.trim() : '';
+    return t || null;
+}
+
 // ══════════════════════════════════════════════════════════
 //  多维标签（scene 场景 / garment 服装 / impression 气质）
 //  scene / impression：自由文本多选

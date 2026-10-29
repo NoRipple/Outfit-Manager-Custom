@@ -155,6 +155,8 @@ export function injectStyles() {
             'display:flex;flex-direction:column;background:var(--om-card-bg,rgba(127,127,127,.08));',
             'color:var(--om-text,#111);}',
             '.om-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.25);}',
+            /* 屏幕外卡片跳过排版与绘制（1400+ 套时显著降负载） */
+            '.om-card{content-visibility:auto;contain-intrinsic-size:auto 220px;}',
             '.om-card.on{border-color:var(--SmartThemeQuoteColor,#7c6daf);',
             'box-shadow:0 0 0 1px var(--SmartThemeQuoteColor,#7c6daf),0 4px 16px rgba(0,0,0,.2);}',
             /* 图片区 */

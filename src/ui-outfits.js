@@ -15,7 +15,7 @@ import {
     getCatNames, getSubCats, hasSubCats,
     partGetById, partIsActive, partGetAccById,
     getActiveKit, getKitAccessories, ensureOutfitKits,
-    getOutfitImages, getOutfitPrimaryImage, getOutfitImageCount,
+    getOutfitImages, getOutfitPrimaryImage, getOutfitImageCount, getOutfitThumb,
     getOutfitTags, outfitHasTags, outfitTagText,
     SHARED_CHAR_KEY
 } from './data.js';
@@ -200,12 +200,17 @@ function setupGridLazyImages(area) {
         var id = img.getAttribute('data-outfit-id');
         var part = loadCurrent();
         var o = partGetById(part, id);
+        var thumb = getOutfitThumb(o);
         var prim = getOutfitPrimaryImage(o);
-        if (!prim) return;
+        if (!thumb && !prim) return;
         img.dataset.loaded = '1';
         img.onload = function () { img.classList.add('om-loaded'); };
-        img.onerror = function () { img.classList.add('om-loaded'); };
-        img.src = prim;
+        // 缩略图失败时回退原图
+        img.onerror = function () {
+            if (thumb && prim && img.src.indexOf(prim) === -1) { img.src = prim; return; }
+            img.classList.add('om-loaded');
+        };
+        img.src = thumb || prim;
         img.removeAttribute('data-outfit-id');
         if (img.complete && img.naturalWidth) img.classList.add('om-loaded');
     }
@@ -222,11 +227,6 @@ function setupGridLazyImages(area) {
 
     imgs.forEach(function (img) { gridImageObserver.observe(img); });
     Array.prototype.slice.call(imgs, 0, 12).forEach(loadImg);
-    setTimeout(function () {
-        imgs.forEach(function (img) {
-            if (img && img.dataset.loaded !== '1') loadImg(img);
-        });
-    }, 350);
 }
 
 // ── 分类栏渲染（使用新 API）────────────────────────────────
@@ -416,7 +416,8 @@ export function renderOutfitGrid(area, part) {
             var badge = (on && !state.batchMode) ? '<div class="om-badge-on"><i class="fa-solid fa-check"></i></div>' : '';
 
             var imgContent = '';
-            if (getOutfitPrimaryImage(o)) {
+            var hasThumb = !!getOutfitThumb(o);
+            if (hasThumb || getOutfitPrimaryImage(o)) {
                 imgContent = '<img class="om-lazy-img" src="' + OM_TRANSPARENT_PIXEL + '" data-outfit-id="' + esc(o.id) + '" alt="' + esc(o.name) + '" loading="lazy" decoding="async" />';
             } else {
                 var descPreview = (o.description && o.description.trim()) ? o.description.trim() : '';
@@ -440,7 +441,7 @@ export function renderOutfitGrid(area, part) {
                     return '<span class="om-card-garm">' + esc(g.base) + subsHtml + '</span>';
                 }).join('') + '</div>';
             }
-            html += '<div class="om-card' + (on ? ' on' : '') + (bsel ? ' batch-sel' : '') + (getOutfitPrimaryImage(o) ? '' : ' no-img') + '" data-id="' + o.id + '">' +
+            html += '<div class="om-card' + (on ? ' on' : '') + (bsel ? ' batch-sel' : '') + (hasThumb || getOutfitPrimaryImage(o) ? '' : ' no-img') + '" data-id="' + o.id + '">' +
                 '<div class="om-card-img">' +
                 checkBox + imgContent + favMark + badge + imgCount + menuBtn +
                 '</div>' +
