@@ -104,26 +104,48 @@ function tagLineText(o) {
 
 var _uniformOwner = '';
 
-function cardHtml(item, idx) {
+var CARD_H = 208;
+var CARD_H_COMPACT = 104;
+
+function cardHeight() {
+    var el = document.getElementById(WIN_ID);
+    return (el && el.classList.contains('om-act-compact')) ? CARD_H_COMPACT : CARD_H;
+}
+
+function cardBg(o, thumb) {
+    // 底部深色渐变压在图片上，保证任何主题下文字都可读
+    var g = 'linear-gradient(to top,rgba(12,10,14,.95) 0%,rgba(12,10,14,.80) 30%,rgba(12,10,14,.22) 56%,rgba(12,10,14,0) 78%)';
+    if (thumb) return g + ",url('" + String(thumb).replace(/'/g, '%27') + "')";
+    return g + ',linear-gradient(135deg,#4c4657,#7d7389)';
+}
+
+function cardHtml(item, idx, H) {
     var o = item.outfit;
     var imgs = getOutfitImages(o);
     var thumb = getOutfitThumb(o) || imgs[0] || '';
     var tagText = tagLineText(o);
     var worn = getWorn()[o.id];
     var num = ('0' + (idx + 1)).slice(-2);
-    return '<div class="om-act-card' + (worn ? ' om-act-card-worn' : '') + '" data-idx="' + idx + '">' +
-        (thumb
-            ? '<img class="om-act-pic" src="' + esc(thumb) + '" alt="" loading="lazy" />'
-            : '<span class="om-act-noimg"><i class="fa-solid fa-shirt"></i></span>') +
+    var h = H || CARD_H;
+    return '<div class="om-act-card' + (worn ? ' om-act-card-worn' : '') + '" data-idx="' + idx + '"' +
+        ' style="height:' + h + 'px;background-image:' + cardBg(o, thumb) + ';">' +
         '<span class="om-act-idx">' + num + '</span>' +
         (worn ? '<span class="om-act-wornmark"><i class="fa-solid fa-check"></i></span>' : '') +
-        '<div class="om-act-info">' +
-            (worn ? '<div class="om-act-worn"><i class="fa-solid fa-shirt"></i> 本楼穿着' + (wornOwnerSuffix(worn.owner || item.owner)) + '</div>' : '') +
+        '<div class="om-act-info" style="color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.65);">' +
+            (worn ? '<div class="om-act-worn" style="font-size:10px;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;"><i class="fa-solid fa-shirt"></i> 本楼穿着</div><div class="om-act-wornwho" style="font-size:10px;color:rgba(255,255,255,.82);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">' + esc(worn.owner || item.owner) + '</div>' : '') +
             (item.owner === _uniformOwner ? '' : '<div class="om-act-owner">' + esc(item.owner) + '</div>') +
-            '<div class="om-act-name">' + esc(o.name || '未命名穿搭') + '</div>' +
-            (tagText ? '<div class="om-act-tags">' + esc(tagText) + '</div>' : '') +
+            '<div class="om-act-name" style="color:#fff;">' + esc(o.name || '未命名穿搭') + '</div>' +
+            (tagText ? '<div class="om-act-tags" style="color:rgba(255,255,255,.8);">' + esc(tagText) + '</div>' : '') +
         '</div>' +
     '</div>';
+}
+
+function applyCardHeights() {
+    var el = document.getElementById(WIN_ID);
+    if (!el) return;
+    var h = cardHeight();
+    var cards = el.querySelectorAll('.om-act-card');
+    for (var i = 0; i < cards.length; i++) cards[i].style.height = h + 'px';
 }
 
 var _lastItems = [];
@@ -159,7 +181,8 @@ function renderBody() {
         body.innerHTML = '<div class="om-act-empty">当前没有生效的穿搭。<br><span>在衣柜里激活几套后再来看看。</span></div>';
         return;
     }
-    body.innerHTML = items.map(cardHtml).join('');
+    var _h = cardHeight();
+    body.innerHTML = items.map(function (it, ix) { return cardHtml(it, ix, _h); }).join('');
     var cards = body.querySelectorAll('.om-act-card');
     for (var i = 0; i < cards.length; i++) {
         cards[i].addEventListener('click', function () {
@@ -189,6 +212,7 @@ function fitToChat() {
         el.classList.add('om-act-compact');
         el.style.width = '';
     }
+    applyCardHeights();
 }
 
 function openWindow() {
