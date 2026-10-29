@@ -2,7 +2,7 @@
 // fetch/XHR 拦截 + 穿搭信息注入到 AI 请求
 // v2: 使用 loadMeta() + loadActivePartitions() 代替旧 load() 全量读取
 
-import { loadMeta, saveMeta, loadActivePartitions, currentUserPartKey, charNameById } from './db.js';
+import { loadMeta, saveMeta, loadActivePartitions, currentUserPartKey, charNameById, resolveImageForExternal } from './db.js';
 import { SHARED_CHAR_KEY, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags, garmentItemText } from './data.js';
 import { toast } from './utils.js';
 import { state } from './bridge.js';
@@ -132,7 +132,68 @@ function getInjectImageUrls(outfit) {
             if (same) return cached.dataUrls;
         }
     }
-    return imgs;
+    // 兜底：接口只认 http(s):// 或 data:image/，相对路径会被判成 Unsupported image_url format
+    var base = '';
+    try { base = location.origin || ''; } catch (e) {}
+    return imgs.map(function (u) {
+        if (typeof u !== 'string') return u;
+        if (u.indexOf('data:image/') === 0) return u;
+        if (u.indexOf('http://') === 0 || u.indexOf('https://') === 0) return u;
+        if (u.charAt(0) === '/' && base) return base + u;
+        return u;
+    });
+}
+
+// ── 图片预热：注入前把 server 图片解析成 data URL（同步注入拿不到异步结果）──
+var imageWarmInFlight = null;
+function warmActiveImages() {
+    if (imageWarmInFlight) return imageWarmInFlight;
+    var jobs = [];
+    try {
+        var parts = loadActivePartitions();
+        for (var pk in parts) {
+            (function (part) {
+                if (!part || !part.outfits || !part.activeIds) return;
+                part.activeIds.forEach(function (id) {
+                    var o = partGetById(part, id);
+                    if (!o) return;
+                    var imgs = getOutfitImages(o);
+                    if (!imgs.length) return;
+                    var cached = state.resolvedImages && state.resolvedImages[o.id];
+                    if (cached && cached.urls && cached.urls.length === imgs.length) {
+                        var same = true;
+                        for (var i = 0; i < imgs.length; i++) {
+                            if (cached.urls[i] !== imgs[i]) { same = false; break; }
+                        }
+                        if (same) return;
+                    }
+                    jobs.push(new Promise(function (resolve) {
+                        var resolved = new Array(imgs.length);
+                        var pending = imgs.length;
+                        var finish = function () {
+                            state.resolvedImages[o.id] = { urls: imgs.slice(), dataUrls: resolved.slice() };
+                            resolve();
+                        };
+                        imgs.forEach(function (u, i) {
+                            if (typeof u === 'string' && u.indexOf('/api/plugins/outfit-manager/images/') === 0) {
+                                resolveImageForExternal(u, function (d) {
+                                    resolved[i] = (typeof d === 'string' && d.indexOf('data:image/') === 0) ? d : u;
+                                    if (--pending === 0) finish();
+                                });
+                            } else {
+                                resolved[i] = u;
+                                if (--pending === 0) finish();
+                            }
+                        });
+                    }));
+                });
+            })(parts[pk]);
+        }
+    } catch (e) {}
+    var all = Promise.all(jobs);
+    imageWarmInFlight = all.then(function () { imageWarmInFlight = null; }, function () { imageWarmInFlight = null; });
+    // 最多等 4 秒，超时就按现有缓存继续，别把聊天卡住
+    return Promise.race([imageWarmInFlight, new Promise(function (r) { if (typeof setTimeout === 'function') setTimeout(r, 4000); })]);
 }
 
 // ── 文本注入 ─────────────────────────────────────────────
@@ -643,24 +704,34 @@ export function setupInjection() {
                 // 只拦截真正的聊天请求：URL 命中聊天端点特征，或百宝库回写路径（嵌套聊天体）
                 var isBaibao = isBaibaokuSaveGenerateRequest(input);
                 if (isBaibao || isChatLikeUrl(getFetchUrl(input))) {
-                    var nb = tryInjectBody(init.body, { baibaokuSaveGenerate: isBaibao });
-                    if (nb) {
-                        var nextInit = Object.assign({}, init, { body: nb });
-                        var req = origFetch.call(this, input, nextInit);
+                    var self = this;
+                    var rawInput = input;
+                    var rawInit = init;
+                    // 要发图就先等图片解析成 data URL（接口只认 data:/http(s)）
+                    var wantImg = false;
+                    try {
+                        var mm = loadMeta();
+                        wantImg = (mm.injectMode || 'tag_text') === 'tag_text_image' && !modelRejectsImages(mm, '');
+                    } catch (e3) {}
+                    var pre = wantImg ? warmActiveImages() : Promise.resolve();
+                    return pre.then(function () {
+                        var nb = tryInjectBody(rawInit.body, { baibaokuSaveGenerate: isBaibao });
+                        if (!nb) return origFetch.call(self, rawInput, rawInit);
+                        var nextInit = Object.assign({}, rawInit, { body: nb });
+                        var req = origFetch.call(self, rawInput, nextInit);
                         // 实测学习：接口拒绝图片 → 记住该模型，并用去掉图片的请求体重发一次
                         if (!bodyHasImages(nb)) return req;
                         var modelName = '';
                         try { modelName = JSON.parse(nb).model || ''; } catch (e2) {}
-                        var self = this;
                         return req.then(function (res) {
                             if (!res || res.ok) return res;
                             return res.clone().text().then(function (txt) {
                                 if (!looksLikeImageRejection(txt)) return res;
                                 rememberNoImageSupport(modelName);
-                                return origFetch.call(self, input, Object.assign({}, init, { body: stripImagesFromBody(nb) }));
+                                return origFetch.call(self, rawInput, Object.assign({}, rawInit, { body: stripImagesFromBody(nb) }));
                             }).catch(function () { return res; });
                         });
-                    }
+                    }).catch(function () { return origFetch.call(self, rawInput, rawInit); });
                 }
             }
         } catch (e) {}

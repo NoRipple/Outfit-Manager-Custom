@@ -67,7 +67,7 @@ async function run() {
     };
 
     const context = vm.createContext({
-        console, Promise, Math, JSON, Object, Array, String, Number, Boolean, Date, Error, URL,
+        console, Promise, Math, JSON, Object, Array, String, Number, Boolean, Date, Error, URL, setTimeout, clearTimeout,
         location: { href: 'https://st.local/', origin: 'https://st.local' },
         SillyTavern: { getContext: () => ({ name2: 'Alice', chat: [] }) },
         window
@@ -78,7 +78,7 @@ async function run() {
 
     await mod.link(async (specifier) => {
         if (specifier === './db.js') {
-            return new vm.SyntheticModule(['loadMeta', 'saveMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById'], function () {
+            return new vm.SyntheticModule(['loadMeta', 'saveMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById', 'resolveImageForExternal'], function () {
                 this.setExport('loadMeta', () => meta);
                 this.setExport('saveMeta', (m) => { Object.assign(meta, m); });
                 this.setExport('loadActivePartitions', () => ({
@@ -86,6 +86,7 @@ async function run() {
                 }));
                 this.setExport('currentUserPartKey', () => 'user:__default__');
                 this.setExport('charNameById', () => '');
+                this.setExport('resolveImageForExternal', (u, cb) => cb('data:image/jpeg;base64,AAA' + String(u).slice(-8)));
             }, { context });
         }
         if (specifier === './data.js') {
@@ -107,7 +108,7 @@ async function run() {
             return new vm.SyntheticModule(['toast'], function () { this.setExport('toast', () => {}); }, { context });
         }
         if (specifier === './bridge.js') {
-            return new vm.SyntheticModule(['state'], function () { this.setExport('state', {}); }, { context });
+            return new vm.SyntheticModule(['state'], function () { this.setExport('state', { resolvedImages: {} }); }, { context });
         }
         throw new Error('Unexpected import: ' + specifier);
     });
@@ -141,7 +142,8 @@ async function run() {
     const tagTextImg = await injectOnce('tag_text_image', 'C');
     assert.ok(tagTextImg.indexOf('白色衬衫配米色长裤') !== -1, '标签+文字+图片：应包含描述文字');
     assert.ok(tagTextImg.indexOf('image_url') !== -1, '标签+文字+图片：应注入图片块');
-    assert.ok(tagTextImg.indexOf('abc.jpg') !== -1, '标签+文字+图片：应包含图片地址');
+    assert.ok(tagTextImg.indexOf('data:image/jpeg;base64,') !== -1, '标签+文字+图片：图片必须是 data URL（接口只认 data:/http(s)）');
+    assert.equal(tagTextImg.indexOf('"/api/plugins/outfit-manager/images/'), -1, '标签+文字+图片：不应把相对路径直接发给接口');
 
     // ── 旧配置兼容：没有 injectMode 时按 tag_text 处理（不炸、不注入图片） ──
     delete meta.injectMode;

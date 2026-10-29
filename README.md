@@ -2,9 +2,14 @@
 
 SillyTavern 穿搭管理插件 —— 让 AI 不再为角色乱编服装。
 
-当前版本：2.6.3
+当前版本：2.6.4
 
 ## 更新日志
+
+### 2.6.4
+
+- 修复发图报 `Unsupported image_url format` 的真正原因：注入时图片地址有时还是插件服务器上的**相对路径**（`/api/plugins/outfit-manager/images/xxx.png`），接口只认 `data:image/...` 或 `http(s)://`。现在注入前会先把图片解析成 base64 data URL（最多等 4 秒），解析失败才退回绝对 URL。
+- 修复被 2.6.2 误记为「不支持图片」的模型：只要把「图片策略」改成「自动」并清除记录即可恢复带图（记录存在 `meta.modelImageSupport`）。
 
 ### 2.6.3
 

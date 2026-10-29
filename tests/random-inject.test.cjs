@@ -77,12 +77,13 @@ async function run() {
 
     await mod.link(async (specifier) => {
         if (specifier === './db.js') {
-            return new vm.SyntheticModule(['loadMeta', 'saveMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById'], function () {
+            return new vm.SyntheticModule(['loadMeta', 'saveMeta', 'loadActivePartitions', 'currentUserPartKey', 'charNameById', 'resolveImageForExternal'], function () {
                 this.setExport('loadMeta', () => meta);
                 this.setExport('saveMeta', (m) => { Object.assign(meta, m); });
                 this.setExport('loadActivePartitions', () => ({ 'char:__shared__': sharedPart }));
                 this.setExport('currentUserPartKey', () => 'user:__default__');
                 this.setExport('charNameById', () => '');
+                this.setExport('resolveImageForExternal', (u, cb) => cb(u));
             }, { context });
         }
         if (specifier === './data.js') {

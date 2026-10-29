@@ -1448,6 +1448,7 @@ function openSettingsSheet() {
         '<option value="always"' + (d.imagePolicy === 'always' ? ' selected' : '') + '>始终带图</option>' +
         '<option value="never"' + (d.imagePolicy === 'never' ? ' selected' : '') + '>从不带图</option>' +
         '</select></div>',
+        '<div class="om-setting-row om-row-inline"><label>图片能力记录 <span class="om-hint">曾被接口拒绝过图片的模型会记在这里，下次直接跳过图片；换模型或接口支持图片后点这里清空</span></label><button class="om-btn om-btn-outline" id="om-clear-img-support">清空记录</button></div>',
         '<div class="om-setting-row om-row-inline"><label>要求 AI 标注本楼穿搭 <span class="om-hint">在注入内容里附名称清单，让 AI 回复末尾输出 &lt;Outfit-Manager-Custom&gt;名称/角色+…&lt;/Outfit-Manager-Custom&gt;，插件会把它渲染成可点卡片</span></label><input type="checkbox" class="om-chk" id="om-marker-enabled"' + (d.markerEnabled !== false ? ' checked' : '') + ' /></div>',
 
         '<div class="om-setting-row"><label>注入位置 <span class="om-hint">Gemini/DeepSeek 建议选\"用户消息\"</span></label><select id="om-inject-pos">',
@@ -1541,6 +1542,7 @@ function openSettingsSheet() {
     sheet.querySelector('#om-inject-mode').addEventListener('change', function () { var m = loadMeta(); m.injectMode = this.value; saveMeta(m); });
     sheet.querySelector('#om-marker-enabled').addEventListener('change', function () { var m = loadMeta(); m.markerEnabled = this.checked; saveMeta(m); });
     sheet.querySelector('#om-image-policy').addEventListener('change', function () { var m = loadMeta(); m.imagePolicy = this.value; saveMeta(m); });
+    sheet.querySelector('#om-clear-img-support').addEventListener('click', function () { var m = loadMeta(); m.modelImageSupport = {}; saveMeta(m); toast('已清空图片能力记录'); });
     sheet.querySelector('#om-inject-enabled').addEventListener('change', function () {
         var m = loadMeta(); m.injectEnabled = this.checked; saveMeta(m);
         // 同步重建悬浮球，刷新注入快捷开关状态
