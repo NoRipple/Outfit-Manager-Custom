@@ -2,7 +2,7 @@
 // 批量标签、批量导入、批量AI生成、数据导出导入
 
 import { load, save, loadMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, currentUserPartKey, syncActivePartitions, charIdByName, isServerMode, batchResolveImages, uploadImage, getImageUrlPrefix } from './db.js';
-import { getCharData, getViewOutfits, getViewCategories, getById, getCatNames, getSubCats, partGetById, partGetAccById, cleanAccIdFromKits, SHARED_CHAR_KEY, SHARED_CHAR_LABEL } from './data.js';
+import { getCharData, getViewOutfits, getViewCategories, getById, getCatNames, getSubCats, partGetById, partGetAccById, cleanAccIdFromKits, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, getOutfitTags, setOutfitTags, addOutfitTag, emptyTags } from './data.js';
 import { genId, esc, toast, getPopupLayer, compressImage } from './utils.js';
 import { batchGenerateDescriptions, batchGenerateAccDescriptions, classifyOutfitImage } from './api.js';
 import { state, fn } from './bridge.js';
@@ -164,81 +164,146 @@ function mergeAccessoriesByName(existing, incoming) {
     return map;
 }
 
-// ── 批量标签选择面板 ──────────────────────────────────────
+// ── 批量标签选择面板（三组 / 追加式）─────────────────────
 function openBatchTagPanel(selectedIds, onDone) {
-    var d = load();
-    var tags = getAllTagSuggestions(d);
-    var allOutfits = getViewOutfits(d);
     var count = selectedIds.length;
+    var activeGroup = 'scene';
 
-    function countTag(tag) {
+    function selectedOutfits() {
+        var curP = loadCurrent();
+        var list = [];
+        (curP.outfits || []).forEach(function (o) { if (selectedIds.indexOf(o.id) !== -1) list.push(o); });
+        return list;
+    }
+
+    function groupTags(group) {
+        var found = [];
+        getViewOutfits(load()).forEach(function (o) {
+            getOutfitTags(o)[group].forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
+        });
+        var order = load().tagOrder || [];
+        return found.sort(function (a, b) {
+            var ia = order.indexOf(a), ib = order.indexOf(b);
+            if (ia === -1 && ib === -1) return 0;
+            if (ia === -1) return 1;
+            if (ib === -1) return -1;
+            return ia - ib;
+        });
+    }
+
+    function countTag(group, tag) {
         var n = 0;
-        allOutfits.forEach(function (o) { if (o.sceneTag && o.sceneTag.trim() === tag) n++; });
+        getViewOutfits(load()).forEach(function (o) {
+            if (getOutfitTags(o)[group].indexOf(tag) !== -1) n++;
+        });
         return n;
     }
 
+    function allSelectedHave(group, tag) {
+        var list = selectedOutfits();
+        if (!list.length) return false;
+        return list.every(function (o) { return getOutfitTags(o)[group].indexOf(tag) !== -1; });
+    }
+
     var sheet = createSheet([
-        '<div class="om-sheet-title"><i class="fa-solid fa-tags"></i>设置场景标签</div>',
-        '<div class="om-hint" style="margin-bottom:10px">为已选 ' + count + ' 套穿搭设置标签</div>',
-        '<div class="om-tagpanel">',
+        '<div class="om-sheet-title"><i class="fa-solid fa-tags"></i>批量设置标签</div>',
+        '<div class="om-hint" style="margin-bottom:10px">为已选 ' + count + ' 套穿搭添加标签（追加，不覆盖已有标签）</div>',
+        '<div class="om-tagpanel-tabs" id="om-btag-tabs">' + TAG_GROUPS.map(function (g) {
+            return '<button type="button" class="om-tagpanel-tab" data-g="' + g.key + '">' + esc(g.label) + '</button>';
+        }).join('') + '</div>',
         '<input type="text" class="om-tagpanel-search" id="om-btag-search" placeholder="搜索标签…" autocomplete="off" />',
         '<div class="om-tagpanel-list" id="om-btag-list"></div>',
-        '<div class="om-tagpanel-add"><input type="text" id="om-btag-new" placeholder="输入新标签并应用…" /><button class="om-btn om-btn-safe" id="om-btag-apply">应用</button></div>',
+        '<div class="om-tagpanel-add"><input type="text" id="om-btag-new" placeholder="输入新标签并添加…" /><button class="om-btn om-btn-safe" id="om-btag-apply">添加</button></div>',
         '<div class="om-divider" style="margin:6px 0"></div>',
-        '<button class="om-btn om-btn-outline" id="om-btag-clear" style="width:100%;opacity:.6"><i class="fa-solid fa-eraser"></i> 清除所选穿搭的标签</button>',
-        '</div>',
+        '<button class="om-btn om-btn-outline" id="om-btag-clear" style="width:100%;opacity:.6"><i class="fa-solid fa-eraser"></i> 清空所选穿搭的这一组标签</button>',
+        '<button class="om-btn om-btn-safe" id="om-btag-done" style="width:100%;margin-top:8px">完成</button>'
     ].join(''));
 
     var listEl = sheet.querySelector('#om-btag-list');
     var searchInp = sheet.querySelector('#om-btag-search');
+    var tabsEl = sheet.querySelector('#om-btag-tabs');
 
-    function renderList(filter) {
-        var q = (filter || '').trim().toLowerCase();
-        var filtered = q ? tags.filter(function (t) { return t.toLowerCase().indexOf(q) !== -1; }) : tags;
-
-        if (filtered.length === 0) {
-            listEl.innerHTML = '<div class="om-tagpanel-empty">' + (q ? '没有匹配的标签' : '还没有标签') + '</div>';
-            return;
-        }
-
-        listEl.innerHTML = filtered.map(function (tag) {
-            return '<div class="om-cat-item om-btag-pick" data-tag="' + esc(tag) + '" style="cursor:pointer"><span class="om-cat-name">' + esc(tag) + '</span><span class="om-cat-count">' + countTag(tag) + '套</span></div>';
-        }).join('');
-
-        listEl.querySelectorAll('.om-btag-pick').forEach(function (item) {
-            item.addEventListener('click', function () {
-                applyTag(item.dataset.tag);
-            });
+    function renderTabs() {
+        tabsEl.querySelectorAll('.om-tagpanel-tab').forEach(function (b) {
+            b.classList.toggle('active', b.dataset.g === activeGroup);
         });
     }
 
-    function applyTag(tag) {
-        var curP = loadCurrent();
-        curP.outfits.forEach(function (o) { if (selectedIds.indexOf(o.id) !== -1) o.sceneTag = tag; });
-        saveCurrent(curP); closeSheet(sheet);
-        toast('✅ 已设置标签：' + tag);
-        if (onDone) onDone();
+    function renderList() {
+        var tags = groupTags(activeGroup);
+        var q = (searchInp.value || '').trim().toLowerCase();
+        var shown = q ? tags.filter(function (t) { return t.toLowerCase().indexOf(q) !== -1; }) : tags;
+        if (!shown.length) {
+            listEl.innerHTML = '<div class="om-tagpanel-empty">' + (q ? '没有匹配的标签' : '这个分组还没有标签，可在下方输入新标签') + '</div>';
+            return;
+        }
+        listEl.innerHTML = shown.map(function (tag) {
+            var has = allSelectedHave(activeGroup, tag);
+            return '<div class="om-cat-item om-btag-pick" data-tag="' + esc(tag) + '" style="cursor:pointer">' +
+                '<span class="om-cat-name">' + esc(tag) + (has ? ' <i class="fa-solid fa-check" style="opacity:.5"></i>' : '') + '</span>' +
+                '<span class="om-cat-count">' + countTag(activeGroup, tag) + '套</span></div>';
+        }).join('');
+        listEl.querySelectorAll('.om-btag-pick').forEach(function (item) {
+            item.addEventListener('click', function () { applyTag(item.dataset.tag); });
+        });
     }
 
-    renderList('');
-    searchInp.addEventListener('input', function () { renderList(this.value); });
+    function applyTag(raw) {
+        var tag = (raw || '').trim();
+        if (!tag) { toast('请输入标签', true); return; }
+        var curP = loadCurrent();
+        var n = 0;
+        (curP.outfits || []).forEach(function (o) {
+            if (selectedIds.indexOf(o.id) === -1) return;
+            var before = getOutfitTags(o)[activeGroup].length;
+            addOutfitTag(o, activeGroup, tag);
+            if (getOutfitTags(o)[activeGroup].length > before) n++;
+        });
+        saveCurrent(curP);
+        renderList();
+        toast(n ? ('✅ 已给 ' + n + ' 套穿搭加上「' + tag + '」') : '这些穿搭已经有这个标签了');
+    }
+
+    tabsEl.querySelectorAll('.om-tagpanel-tab').forEach(function (b) {
+        b.addEventListener('click', function () {
+            activeGroup = b.dataset.g;
+            searchInp.value = '';
+            renderTabs();
+            renderList();
+        });
+    });
+
+    renderTabs();
+    renderList();
+    searchInp.addEventListener('input', function () { renderList(); });
     setTimeout(function () { searchInp.focus(); }, 100);
 
-    // 输入新标签并直接应用
+    // 输入新标签并添加
     var newInp = sheet.querySelector('#om-btag-new');
     sheet.querySelector('#om-btag-apply').addEventListener('click', function () {
-        var tag = newInp.value.trim();
-        if (!tag) { toast('请输入标签', true); return; }
-        applyTag(tag);
+        if (!newInp.value.trim()) { toast('请输入标签', true); return; }
+        applyTag(newInp.value);
+        newInp.value = '';
     });
     newInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') sheet.querySelector('#om-btag-apply').click(); });
 
-    // 清除标签
+    // 清空该组标签
     sheet.querySelector('#om-btag-clear').addEventListener('click', function () {
+        if (!window.confirm('清空所选 ' + count + ' 套穿搭的「' + (TAG_GROUPS.filter(function (g) { return g.key === activeGroup; })[0] || {}).label + '」标签？')) return;
         var curP = loadCurrent();
-        curP.outfits.forEach(function (o) { if (selectedIds.indexOf(o.id) !== -1) o.sceneTag = ''; });
-        saveCurrent(curP); closeSheet(sheet);
-        toast('✅ 已清除 ' + count + ' 套穿搭的标签');
+        (curP.outfits || []).forEach(function (o) {
+            if (selectedIds.indexOf(o.id) === -1) return;
+            var tg = getOutfitTags(o);
+            tg[activeGroup] = [];
+            setOutfitTags(o, tg);
+        });
+        saveCurrent(curP);
+        renderList();
+        toast('✅ 已清空这一组标签');
+    });
+
+    sheet.querySelector('#om-btag-done').addEventListener('click', function () {
+        closeSheet(sheet);
         if (onDone) onDone();
     });
 }
@@ -930,6 +995,7 @@ function openBatchImportModal(files) {
                                     subCategory: cls.subCategory || '',
                                     description: '',
                                     sceneTag: '',
+                                    tags: emptyTags(),
                                     imageData: imageData,
                                     favorite: false,
                                     kits: [],

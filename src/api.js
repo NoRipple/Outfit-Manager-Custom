@@ -2,8 +2,47 @@
 // Vision API、模型选择、批量描述生成
 
 import { load, save, loadMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, resolveImageForExternal } from './db.js';
-import { getById, partGetById, partGetAccById } from './data.js';
+import { getById, partGetById, partGetAccById, normalizeTags, TAG_GROUP_KEYS, TAG_GROUPS, setOutfitTags, outfitHasTags } from './data.js';
 import { toast, getPopupLayer, esc } from './utils.js';
+
+// ── 标签生成指令（追加在用户 prompt 之后，用户改 prompt 也不会丢）──
+var TAG_INSTRUCTION = [
+    '',
+    '另外请在 JSON 里加一个 tags 字段，给这套穿搭打三组标签（每组 0-4 个词，每个词 2-6 个汉字，只写词不要整句，没有就给空数组）：',
+    '- tags.scene：场景/时机，例如 通勤、约会、雨天、居家、睡前、运动、宴会',
+    '- tags.garment：主要单品，例如 衬衫、百褶裙、风衣、高跟鞋、针织衫',
+    '- tags.impression：气质观感，例如 清纯、干练、性感、慵懒、甜美、帅气',
+    'tags 结构示例：{"scene":["通勤"],"garment":["衬衫","百褶裙"],"impression":["干练"]}'
+].join('\n');
+
+function withTagInstruction(prompt) {
+    var p = prompt || '';
+    if (p.indexOf('tags.scene') !== -1) return p;
+    return p + '\n' + TAG_INSTRUCTION;
+}
+
+function hasTagContent(tags) {
+    if (!tags || typeof tags !== 'object') return false;
+    for (var i = 0; i < TAG_GROUP_KEYS.length; i++) {
+        var list = tags[TAG_GROUP_KEYS[i]];
+        if (Array.isArray(list) && list.length > 0) return true;
+    }
+    return false;
+}
+
+// 把 AI 返回的标签写回 outfit：overwrite=true 整体覆盖，否则只补缺失的
+function applyParsedTags(o, parsedTags, overwrite) {
+    if (!o || !hasTagContent(parsedTags)) return;
+    if (overwrite) { setOutfitTags(o, parsedTags); return; }
+    var cur = normalizeTags(o.tags);
+    var changed = false;
+    TAG_GROUP_KEYS.forEach(function (k) {
+        (parsedTags[k] || []).forEach(function (t) {
+            if (cur[k].indexOf(t) === -1) { cur[k].push(t); changed = true; }
+        });
+    });
+    if (changed) setOutfitTags(o, cur);
+}
 
 // ── 端点规范化 ─────────────────────────────────────────
 export function normalizeEndpoint(raw, path) {
@@ -109,6 +148,7 @@ function cleanParsed(obj) {
             if (d) obj.description = d;
         }
     }
+    if (obj.tags !== undefined) obj.tags = normalizeTags(obj.tags);
     return obj;
 }
 
@@ -389,7 +429,7 @@ export function batchGenerateDescriptions(outfitIds, options, progressCb, doneCb
         var o = partGetById(srcPart, id);
         if (!o || !o.imageData) return;
         var skipDescription = !!(o.description && o.description.trim() && !overwriteDescription);
-        if (skipDescription && !options.autoClassify) return;
+        if (skipDescription && !options.autoClassify && outfitHasTags(o)) return;
         queue.push({
             id: id,
             name: o.name,
@@ -417,6 +457,7 @@ export function batchGenerateDescriptions(outfitIds, options, progressCb, doneCb
         var total = queue.length;
         var concurrency = 3;
         var prompt = options.autoClassify ? buildCombinedDescriptionPrompt(apiCfg.prompt, categories) : apiCfg.prompt;
+        prompt = withTagInstruction(prompt);
         var stats = {
             descTarget: queue.filter(function (item) { return !item.skipDescription; }).length,
             descSuccess: 0,
@@ -456,6 +497,7 @@ export function batchGenerateDescriptions(outfitIds, options, progressCb, doneCb
                                     o.subCategory = cls.subCategory || '';
                                     stats.classSuccess++;
                                 }
+                                applyParsedTags(o, parsed && parsed.tags, overwriteDescription);
                                 savePartition(sourcePartKey, cp);
                             }
                         }
@@ -550,13 +592,13 @@ export function generateSingleDescription(outfit, cb) {
     if (!outfit.imageData) { cb('该穿搭没有图片'); return; }
     // server 模式下图片可能是后端 URL，外部 AI 无法访问，需要先 resolve 为 base64
     resolveImageForExternal(outfit.imageData, function (resolvedUrl) {
-        callVisionAPI(apiCfg, { name: outfit.name, dataUrl: resolvedUrl }, apiCfg.prompt, function (err, text) {
+        callVisionAPI(apiCfg, { name: outfit.name, dataUrl: resolvedUrl }, withTagInstruction(apiCfg.prompt), function (err, text) {
             if (err) { cb(err); return; }
             var parsed = parseAIResponse(text);
             if (parsed && parsed.description) {
-                cb(null, { name: parsed.name || '', description: parsed.description });
+                cb(null, { name: parsed.name || '', description: parsed.description, tags: parsed.tags || null });
             } else {
-                cb(null, { name: '', description: text });
+                cb(null, { name: '', description: text, tags: null });
             }
         });
     });

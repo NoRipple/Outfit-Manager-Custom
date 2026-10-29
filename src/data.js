@@ -9,6 +9,18 @@ export var SHARED_CHAR_LABEL = '通用衣柜';
 //  默认数据结构
 // ══════════════════════════════════════════════════════════
 
+// ── 描述生成 Prompt 默认值 ──
+// 新版要求 AI 同时产出三组标签；旧版存量的默认 prompt 会被自动升级。
+export var VISION_PROMPT_DEFAULT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字","tags":{"scene":["场景"],"garment":["单品"],"impression":["气质"]}}';
+export var LEGACY_VISION_PROMPT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字"}';
+
+// 旧默认 prompt 自动升级（用户自定义过的 prompt 不动）
+export function upgradeLegacyVisionPrompt(apiVision) {
+    if (!apiVision || typeof apiVision !== 'object') return apiVision;
+    if (apiVision.prompt === LEGACY_VISION_PROMPT) apiVision.prompt = VISION_PROMPT_DEFAULT;
+    return apiVision;
+}
+
 // ── meta 默认值（全局设置 + 索引 + 激活追踪）──
 export function defMeta() {
     return {
@@ -53,7 +65,7 @@ export function defMeta() {
         // API
         apiVision: {
             endpoint: '', key: '', model: '',
-            prompt: '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字"}',
+            prompt: VISION_PROMPT_DEFAULT,
             accPrompt: '用JSON回复（不要代码块）：{"name":"单品名称6字以内","description":"只描述图中的【{{accCategory}}】这一件单品，详细描述它的材质、颜色、款式、细节特征，不要描述其他服饰或整体穿搭，80-150字"}',
             promptTemplates: [],
             activePromptTemplateId: null,
@@ -94,6 +106,7 @@ export function ensureMetaDefaults(m) {
     }
     if (!Array.isArray(m.apiVision.promptTemplates)) m.apiVision.promptTemplates = [];
     if (m.apiVision.activePromptTemplateId === undefined) m.apiVision.activePromptTemplateId = null;
+    upgradeLegacyVisionPrompt(m.apiVision);
     m._version = 2;
     return m;
 }
@@ -112,6 +125,7 @@ export function ensurePartDefaults(p) {
     p.outfits.forEach(function (o) {
         ensureOutfitKits(o);
         ensureOutfitImages(o);
+        ensureOutfitTags(o);
         if (o.favorite === undefined) o.favorite = false;
     });
     return p;
@@ -258,6 +272,129 @@ export function getOutfitPrimaryImage(o) {
 
 export function getOutfitImageCount(o) {
     return getOutfitImages(o).length;
+}
+
+// ══════════════════════════════════════════════════════════
+//  多维标签（scene 场景 / garment 服装 / impression 气质）
+//  三组全部多选、自由文本；不做字典、不做细分类。
+// ══════════════════════════════════════════════════════════
+
+export var TAG_GROUPS = [
+    { key: 'scene', label: '场景', hint: '什么时候穿：通勤 / 约会 / 雨天 / 睡前' },
+    { key: 'garment', label: '服装', hint: '穿了什么：衬衫 / 百褶裙 / 风衣 / 高跟鞋' },
+    { key: 'impression', label: '气质', hint: '什么感觉：清纯 / 干练 / 性感 / 慵懒' }
+];
+
+export var TAG_GROUP_KEYS = ['scene', 'garment', 'impression'];
+
+export function emptyTags() {
+    return { scene: [], garment: [], impression: [] };
+}
+
+// 单个标签归一化：去首尾空白、合并连续空格、去重、限长 24 字
+export function normalizeTagList(list) {
+    var out = [];
+    if (!Array.isArray(list)) return out;
+    for (var i = 0; i < list.length; i++) {
+        var t = list[i];
+        if (typeof t !== 'string') continue;
+        t = t.trim().replace(/\s+/g, ' ');
+        if (!t) continue;
+        if (t.length > 24) t = t.slice(0, 24);
+        if (out.indexOf(t) === -1) out.push(t);
+    }
+    return out;
+}
+
+// 任意来源（AI 返回 / 旧数据 / 备份）→ 合法 tags 对象
+export function normalizeTags(raw) {
+    var tags = emptyTags();
+    if (!raw || typeof raw !== 'object') return tags;
+    TAG_GROUP_KEYS.forEach(function (k) {
+        tags[k] = normalizeTagList(raw[k]);
+    });
+    return tags;
+}
+
+// 旧单值 sceneTag（"外出 / 家居"）→ 场景标签数组
+export function splitLegacySceneTag(s) {
+    if (typeof s !== 'string' || !s.trim()) return [];
+    return normalizeTagList(s.split(/[\/、,，|；;]+/));
+}
+
+// 就地规范化 outfit.tags，并把 tags.scene 同步回 sceneTag（兼容旧注入/模板）
+export function ensureOutfitTags(o) {
+    if (!o) return o;
+    var tags = normalizeTags(o.tags);
+    if (tags.scene.length === 0) {
+        var legacy = splitLegacySceneTag(o.sceneTag);
+        if (legacy.length) tags.scene = legacy;
+    }
+    o.tags = tags;
+    o.sceneTag = tags.scene.join(' / ');
+    return o;
+}
+
+export function getOutfitTags(o) {
+    return normalizeTags(o && o.tags);
+}
+
+export function setOutfitTags(o, raw) {
+    if (!o) return emptyTags();
+    o.tags = normalizeTags(raw);
+    o.sceneTag = o.tags.scene.join(' / ');
+    return o.tags;
+}
+
+export function addOutfitTag(o, group, tag) {
+    var tags = getOutfitTags(o);
+    if (TAG_GROUP_KEYS.indexOf(group) === -1) return tags;
+    var one = normalizeTagList([tag]);
+    if (one.length && tags[group].indexOf(one[0]) === -1) tags[group].push(one[0]);
+    return setOutfitTags(o, tags);
+}
+
+export function removeOutfitTag(o, group, tag) {
+    var tags = getOutfitTags(o);
+    if (TAG_GROUP_KEYS.indexOf(group) === -1) return tags;
+    var idx = tags[group].indexOf(tag);
+    if (idx !== -1) tags[group].splice(idx, 1);
+    return setOutfitTags(o, tags);
+}
+
+export function outfitHasTags(o) {
+    var tags = normalizeTags(o && o.tags);
+    for (var i = 0; i < TAG_GROUP_KEYS.length; i++) {
+        if (tags[TAG_GROUP_KEYS[i]].length > 0) return true;
+    }
+    return false;
+}
+
+// 扁平化所有标签文本（搜索用）
+export function outfitTagText(o, sep) {
+    var tags = normalizeTags(o && o.tags);
+    var all = [];
+    TAG_GROUP_KEYS.forEach(function (k) {
+        tags[k].forEach(function (t) { all.push(t); });
+    });
+    return all.join(sep || ' ');
+}
+
+// 从一组 partition 里按组收集已有标签（做输入建议）
+export function collectTagsByGroup(partitions) {
+    var result = emptyTags();
+    (partitions || []).forEach(function (p) {
+        if (!p || !Array.isArray(p.outfits)) return;
+        p.outfits.forEach(function (o) {
+            var tags = normalizeTags(o && o.tags);
+            TAG_GROUP_KEYS.forEach(function (k) {
+                tags[k].forEach(function (t) {
+                    if (result[k].indexOf(t) === -1) result[k].push(t);
+                });
+            });
+        });
+    });
+    return result;
 }
 
 // 获取 outfit 当前激活的 kit，无则返回 null

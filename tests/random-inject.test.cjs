@@ -85,13 +85,18 @@ async function run() {
             }, { context });
         }
         if (specifier === './data.js') {
-            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount'], function () {
+            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags'], function () {
                 this.setExport('SHARED_CHAR_KEY', '__shared__');
                 this.setExport('partGetById', (part, id) => (part.outfits || []).find((o) => o.id === id) || null);
                 this.setExport('getActiveKit', () => null);
                 this.setExport('getKitAccessories', () => []);
                 this.setExport('getOutfitImages', () => []);
                 this.setExport('getOutfitImageCount', () => 0);
+                this.setExport('getOutfitTags', (o) => {
+                    const src = (o && o.tags) || {};
+                    const pick = (v) => (Array.isArray(v) ? v.slice() : []);
+                    return { scene: pick(src.scene), garment: pick(src.garment), impression: pick(src.impression) };
+                });
             }, { context });
         }
         if (specifier === './utils.js') {

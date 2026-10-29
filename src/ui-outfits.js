@@ -16,6 +16,7 @@ import {
     partGetById, partIsActive, partGetAccById,
     getActiveKit, getKitAccessories, ensureOutfitKits,
     getOutfitImages, getOutfitPrimaryImage, getOutfitImageCount,
+    getOutfitTags, outfitHasTags, outfitTagText,
     SHARED_CHAR_KEY
 } from './data.js';
 import { esc, toast, getPopupLayer, uniqueIds } from './utils.js';
@@ -340,6 +341,8 @@ export function renderOutfitGrid(area, part) {
         list = list.filter(function (o) {
             return (o.name && o.name.toLowerCase().indexOf(q) !== -1) ||
                 (o.category && o.category.toLowerCase().indexOf(q) !== -1) ||
+                (o.subCategory && o.subCategory.toLowerCase().indexOf(q) !== -1) ||
+                (outfitTagText(o, ' ').toLowerCase().indexOf(q) !== -1) ||
                 (o.sceneTag && o.sceneTag.toLowerCase().indexOf(q) !== -1) ||
                 (o.description && o.description.toLowerCase().indexOf(q) !== -1);
         });
@@ -356,7 +359,7 @@ export function renderOutfitGrid(area, part) {
             }
         }
     }
-    if (state.filterNoTag) { list = list.filter(function (o) { return !o.sceneTag || !o.sceneTag.trim(); }); }
+    if (state.filterNoTag) { list = list.filter(function (o) { return !outfitHasTags(o); }); }
     if (state.filterNoDesc) { list = list.filter(function (o) { return !o.description || !o.description.trim(); }); }
     var originalOrder = {};
     allOutfits.forEach(function (o, idx) { if (o && o.id) originalOrder[o.id] = idx; });
@@ -426,7 +429,8 @@ export function renderOutfitGrid(area, part) {
             var favMark = (!state.batchMode && o.favorite) ? '<div class="om-card-fav-mark" title="已收藏"><i class="fa-solid fa-star"></i></div>' : '';
             var imgCount = (!state.batchMode && getOutfitImageCount(o) > 1) ? '<div class="om-card-imgcount">' + getOutfitImageCount(o) + '</div>' : '';
             var menuBtn = state.batchMode ? '' : '<button class="om-card-menu" data-id="' + o.id + '" title="操作"><i class="fa-solid fa-ellipsis"></i></button>';
-            var tagText = (o.sceneTag && o.sceneTag.trim()) ? o.sceneTag.trim() : '';
+            var tg = getOutfitTags(o);
+            var tagText = tg.scene.length ? tg.scene.join(' · ') : tg.garment.slice(0, 2).join(' · ');
             html += '<div class="om-card' + (on ? ' on' : '') + (bsel ? ' batch-sel' : '') + (getOutfitPrimaryImage(o) ? '' : ' no-img') + '" data-id="' + o.id + '">' +
                 '<div class="om-card-img">' +
                 checkBox + imgContent + favMark + badge + imgCount + menuBtn +

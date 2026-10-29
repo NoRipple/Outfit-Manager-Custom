@@ -4,7 +4,7 @@
 // meta: 全局设置/索引/激活追踪
 // partition: { outfits, categories, activeIds } 按 user/char 独立存储
 
-import { defMeta, defPartition, ensureMetaDefaults, ensurePartDefaults, migrateCategories, SHARED_CHAR_KEY } from './data.js';
+import { defMeta, defPartition, ensureMetaDefaults, ensurePartDefaults, migrateCategories, upgradeLegacyVisionPrompt, SHARED_CHAR_KEY } from './data.js';
 
 // 8位随机ID生成（用于 charId / presetId）
 var ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -1281,6 +1281,7 @@ function migrateFromV1(oldData, cb) {
             meta.apiVision.concurrency = Math.min(meta.apiVision.batchSize, 5);
         }
         delete meta.apiVision.batchSize;
+        upgradeLegacyVisionPrompt(meta.apiVision);
     }
 
     // ── User 默认预设 ──
@@ -1470,6 +1471,7 @@ function splitServerDataToPartitions(serverData, cb) {
         var dv = defMeta().apiVision;
         for (var vk in dv) { if (meta.apiVision[vk] === undefined) meta.apiVision[vk] = dv[vk]; }
         if (meta.apiVision.batchSize) { delete meta.apiVision.batchSize; }
+        upgradeLegacyVisionPrompt(meta.apiVision);
     }
 
     // User

@@ -2,7 +2,7 @@
 // 操作菜单、编辑面板、预设、设置、分类管理、Lightbox、导入导出、批量描述
 
 import { load, save, loadMeta, saveMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, syncActivePartitions, charNameById, isServerMode, uploadImage } from './db.js';
-import { def, getCharData, getViewOutfits, getViewCategories, getViewActiveIds, setViewActiveIds, getById, getViewById, isActive, getCatNames, getSubCats, findCatObj, hasSubCats, partGetById, partIsActive, partGetAccById, cleanAccIdFromKits, getActiveKit, getKitAccessories, ensureOutfitKits, getOutfitImages, getOutfitPrimaryImage, SHARED_CHAR_KEY, SHARED_CHAR_LABEL } from './data.js';
+import { def, getCharData, getViewOutfits, getViewCategories, getViewActiveIds, setViewActiveIds, getById, getViewById, isActive, getCatNames, getSubCats, findCatObj, hasSubCats, partGetById, partIsActive, partGetAccById, cleanAccIdFromKits, getActiveKit, getKitAccessories, ensureOutfitKits, getOutfitImages, getOutfitPrimaryImage, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, emptyTags, getOutfitTags, setOutfitTags, normalizeTagList, collectTagsByGroup } from './data.js';
 import { genId, esc, toast, getPopupLayer, compressImage } from './utils.js';
 import { generateSingleDescription, generateSingleAccDescription, batchGenerateDescriptions, openModelPicker, normalizeEndpoint } from './api.js';
 import { state, fn } from './bridge.js';
@@ -178,197 +178,189 @@ function openContextMenu(outfit, imgOutfits) {
 }
 
 // ── 编辑 Bottom Sheet ─────────────────────────────────────
-function getAllTagSuggestions(d) {
-    // 收集所有实际使用中的标签
+// 收集标签建议（按组）；不传 group 时默认 scene，保持旧调用兼容
+function getAllTagSuggestions(d, group) {
+    var g = TAG_GROUP_KEYS.indexOf(group) !== -1 ? group : 'scene';
     var found = [];
-    d.outfits.forEach(function (o) { if (o.sceneTag && o.sceneTag.trim()) { var t = o.sceneTag.trim(); if (found.indexOf(t) === -1) found.push(t); } });
-    if (d.chars) { for (var cn in d.chars) { (d.chars[cn].outfits || []).forEach(function (o) { if (o.sceneTag && o.sceneTag.trim()) { var t = o.sceneTag.trim(); if (found.indexOf(t) === -1) found.push(t); } }); } }
+    getAllOutfitLists(d).forEach(function (list) {
+        list.forEach(function (o) {
+            getOutfitTags(o)[g].forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
+        });
+    });
     // 按 tagOrder 排序：先按记忆顺序排，新标签追加到末尾
-    var order = d.tagOrder || [];
+    var order = (d && d.tagOrder) || [];
     var sorted = [];
     order.forEach(function (t) { if (found.indexOf(t) !== -1) sorted.push(t); });
     found.forEach(function (t) { if (sorted.indexOf(t) === -1) sorted.push(t); });
     return sorted;
 }
 
-// ── 标签管理面板 ──────────────────────────────────────────
-function openTagPanel(sceneInput) {
+// ── 标签管理面板（三组切换 / 搜索 / 拖拽排序 / 删除）────────
+function openTagPanel(initialGroup) {
     var d = load();
-    var allOutfits = d.outfits.slice();
-    if (d.chars) { for (var cn in d.chars) { allOutfits = allOutfits.concat(d.chars[cn].outfits || []); } }
-    var tags = getAllTagSuggestions(d);
-
-    function countTag(tag) {
-        var n = 0;
-        allOutfits.forEach(function (o) { if (o.sceneTag && o.sceneTag.trim() === tag) n++; });
-        return n;
+    var activeGroup = TAG_GROUP_KEYS.indexOf(initialGroup) !== -1 ? initialGroup : 'scene';
+    var allOutfits = [];
+    function reloadOutfits(src) {
+        allOutfits = [];
+        getAllOutfitLists(src).forEach(function (l) { allOutfits = allOutfits.concat(l); });
     }
+    reloadOutfits(d);
 
     var sheet = createSheet([
-        '<div class="om-sheet-title"><i class="fa-solid fa-tags"></i>场景标签管理</div>',
-        '<div class="om-tagpanel">',
+        '<div class="om-sheet-title"><i class="fa-solid fa-tags"></i>标签管理</div>',
+        '<div class="om-tagpanel-tabs" id="om-tag-tabs">' + TAG_GROUPS.map(function (g) {
+            return '<button type="button" class="om-tagpanel-tab" data-g="' + g.key + '">' + esc(g.label) + '</button>';
+        }).join('') + '</div>',
         '<input type="text" class="om-tagpanel-search" id="om-tag-search" placeholder="搜索标签…" autocomplete="off" />',
         '<div class="om-tagpanel-list" id="om-tag-list"></div>',
-        '<div class="om-tagpanel-add"><input type="text" id="om-tag-new" placeholder="新标签名称…" /><button class="om-btn om-btn-safe" id="om-tag-add">添加</button></div>',
-        '</div>',
+        '<div class="om-tagpanel-tip">标签跟着穿搭走：只有穿搭里用过的标签才会出现在这里；拖动可调整建议顺序。</div>'
     ].join(''));
 
     var listEl = sheet.querySelector('#om-tag-list');
     var searchInp = sheet.querySelector('#om-tag-search');
-    var dragSrcIdx = null;
+    var tabsEl = sheet.querySelector('#om-tag-tabs');
+    var dragFrom = null;
 
-    function renderTagList(filter) {
-        var q = (filter || '').trim().toLowerCase();
-        var filtered = q ? tags.filter(function (t) { return t.toLowerCase().indexOf(q) !== -1; }) : tags;
+    function groupTags(group) {
+        var found = [];
+        allOutfits.forEach(function (o) {
+            getOutfitTags(o)[group].forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
+        });
+        var order = (d && d.tagOrder) || [];
+        return found.sort(function (a, b) {
+            var ia = order.indexOf(a), ib = order.indexOf(b);
+            if (ia === -1 && ib === -1) return 0;
+            if (ia === -1) return 1;
+            if (ib === -1) return -1;
+            return ia - ib;
+        });
+    }
 
-        if (filtered.length === 0) {
-            listEl.innerHTML = '<div class="om-tagpanel-empty">' + (q ? '没有匹配的标签' : '还没有标签，添加穿搭时输入场景标签即可') + '</div>';
-            return;
+    function countTag(group, tag) {
+        var n = 0;
+        allOutfits.forEach(function (o) {
+            if (getOutfitTags(o)[group].indexOf(tag) !== -1) n++;
+        });
+        return n;
+    }
+
+    function renderTabs() {
+        tabsEl.querySelectorAll('.om-tagpanel-tab').forEach(function (b) {
+            b.classList.toggle('active', b.dataset.g === activeGroup);
+        });
+        var cur = null;
+        TAG_GROUPS.forEach(function (g) { if (g.key === activeGroup) cur = g; });
+        if (cur) searchInp.placeholder = '搜索「' + cur.label + '」标签…';
+    }
+
+    function persistOrder(ordered) {
+        var dd = load();
+        var order = Array.isArray(dd.tagOrder) ? dd.tagOrder.slice() : [];
+        var pos = [];
+        ordered.forEach(function (t) { var i = order.indexOf(t); if (i !== -1) pos.push(i); });
+        var at = pos.length ? Math.min.apply(null, pos) : order.length;
+        order = order.filter(function (t) { return ordered.indexOf(t) === -1; });
+        if (at > order.length) at = order.length;
+        Array.prototype.splice.apply(order, [at, 0].concat(ordered));
+        dd.tagOrder = order;
+        save(dd);
+        d.tagOrder = order;
+    }
+
+    function delTag(tag) {
+        if (!window.confirm('从所有穿搭里删除标签「' + tag + '」？\n穿搭本身不会被删除。')) return;
+        var dd = load();
+        var g = activeGroup;
+        function strip(o) {
+            var t = getOutfitTags(o);
+            var i = t[g].indexOf(tag);
+            if (i === -1) return;
+            t[g].splice(i, 1);
+            setOutfitTags(o, t);
         }
+        (dd.outfits || []).forEach(strip);
+        if (dd.chars) { for (var cn in dd.chars) ((dd.chars[cn] || {}).outfits || []).forEach(strip); }
+        if (dd.tagOrder) { var oi = dd.tagOrder.indexOf(tag); if (oi !== -1) dd.tagOrder.splice(oi, 1); }
+        save(dd);
+        d = dd;
+        reloadOutfits(dd);
+        renderList();
+        toast('已删除标签「' + tag + '」');
+    }
 
-        listEl.innerHTML = filtered.map(function (tag, i) {
-            var realIdx = tags.indexOf(tag);
-            return '<div class="om-tagpanel-item" draggable="true" data-idx="' + realIdx + '">' +
-                '<i class="fa-solid fa-grip-vertical om-tagpanel-grip"></i>' +
-                '<span class="om-tagpanel-name">' + esc(tag) + '</span>' +
-                '<span class="om-tagpanel-count">' + countTag(tag) + '套</span>' +
-                '<div class="om-tagpanel-acts">' +
-                '<button class="om-tagpanel-use" data-tag="' + esc(tag) + '" title="使用此标签">使用</button>' +
-                '<button class="om-tagpanel-del" data-idx="' + realIdx + '" title="删除"><i class="fa-solid fa-trash"></i></button>' +
-                '</div></div>';
-        }).join('');
-
-        // 拖拽排序
+    function bindDrag(fullTags) {
         listEl.querySelectorAll('.om-tagpanel-item').forEach(function (item) {
             item.addEventListener('dragstart', function (e) {
-                dragSrcIdx = parseInt(item.dataset.idx);
+                dragFrom = fullTags.indexOf(item.dataset.tag);
                 item.classList.add('dragging');
-                e.dataTransfer.effectAllowed = 'move';
+                if (e.dataTransfer) {
+                    e.dataTransfer.effectAllowed = 'move';
+                    try { e.dataTransfer.setData('text/plain', item.dataset.tag); } catch (_) { }
+                }
             });
             item.addEventListener('dragend', function () {
                 item.classList.remove('dragging');
-                listEl.querySelectorAll('.om-tagpanel-item').forEach(function (el) { el.classList.remove('drag-over'); });
-                dragSrcIdx = null;
+                dragFrom = null;
             });
             item.addEventListener('dragover', function (e) {
+                if (dragFrom === null) return;
                 e.preventDefault();
-                e.dataTransfer.dropEffect = 'move';
-                listEl.querySelectorAll('.om-tagpanel-item').forEach(function (el) { el.classList.remove('drag-over'); });
                 item.classList.add('drag-over');
             });
-            item.addEventListener('dragleave', function () {
-                item.classList.remove('drag-over');
-            });
+            item.addEventListener('dragleave', function () { item.classList.remove('drag-over'); });
             item.addEventListener('drop', function (e) {
                 e.preventDefault();
                 item.classList.remove('drag-over');
-                var targetIdx = parseInt(item.dataset.idx);
-                if (dragSrcIdx === null || dragSrcIdx === targetIdx) return;
-                // 执行交换
-                var moved = tags.splice(dragSrcIdx, 1)[0];
-                tags.splice(targetIdx > dragSrcIdx ? targetIdx - 1 : targetIdx, 0, moved);
-                // 持久化标签顺序
-                var dd = load(); dd.tagOrder = tags.slice(); save(dd);
-                renderTagList(searchInp.value);
-                toast('标签已移动');
-            });
-        });
-
-        // 触屏拖拽排序
-        var touchState = { idx: null, el: null, startY: 0, moved: false };
-        listEl.querySelectorAll('.om-tagpanel-grip').forEach(function (grip) {
-            grip.addEventListener('touchstart', function (e) {
-                var item = grip.closest('.om-tagpanel-item');
-                touchState.idx = parseInt(item.dataset.idx);
-                touchState.el = item;
-                touchState.startY = e.touches[0].clientY;
-                touchState.moved = false;
-                item.classList.add('dragging');
-            }, { passive: true });
-        });
-        listEl.addEventListener('touchmove', function (e) {
-            if (touchState.el === null) return;
-            var dy = Math.abs(e.touches[0].clientY - touchState.startY);
-            if (dy > 8) touchState.moved = true;
-            if (touchState.moved) {
-                var touch = e.touches[0];
-                listEl.querySelectorAll('.om-tagpanel-item').forEach(function (el) {
-                    el.classList.remove('drag-over');
-                    var rect = el.getBoundingClientRect();
-                    if (touch.clientY >= rect.top && touch.clientY <= rect.bottom && el !== touchState.el) {
-                        el.classList.add('drag-over');
-                    }
-                });
-            }
-        }, { passive: true });
-        listEl.addEventListener('touchend', function () {
-            if (touchState.el === null) return;
-            touchState.el.classList.remove('dragging');
-            var overEl = listEl.querySelector('.om-tagpanel-item.drag-over');
-            if (overEl && touchState.moved) {
-                var targetIdx = parseInt(overEl.dataset.idx);
-                var srcIdx = touchState.idx;
-                overEl.classList.remove('drag-over');
-                if (srcIdx !== targetIdx) {
-                    var moved = tags.splice(srcIdx, 1)[0];
-                    tags.splice(targetIdx > srcIdx ? targetIdx - 1 : targetIdx, 0, moved);
-                    var dd = load(); dd.tagOrder = tags.slice(); save(dd);
-                    renderTagList(searchInp.value);
-                    toast('标签已移动');
-                }
-            }
-            listEl.querySelectorAll('.om-tagpanel-item').forEach(function (el) { el.classList.remove('drag-over'); });
-            touchState = { idx: null, el: null, startY: 0, moved: false };
-        }, { passive: true });
-
-        // 使用按钮
-        listEl.querySelectorAll('.om-tagpanel-use').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                if (sceneInput) sceneInput.value = btn.dataset.tag;
-                closeSheet(sheet);
-                toast('已选择：' + btn.dataset.tag);
-            });
-        });
-
-        // 删除按钮
-        listEl.querySelectorAll('.om-tagpanel-del').forEach(function (btn) {
-            btn.addEventListener('click', function () {
-                var idx = parseInt(btn.dataset.idx);
-                var tagName = tags[idx];
-                if (!confirm('删除标签「' + tagName + '」？\n（不会删除穿搭，仅清除对应标签）')) return;
-                // 清除所有穿搭上的此标签
-                var dd = load();
-                dd.outfits.forEach(function (o) { if (o.sceneTag && o.sceneTag.trim() === tagName) o.sceneTag = ''; });
-                if (dd.chars) { for (var cn2 in dd.chars) { (dd.chars[cn2].outfits || []).forEach(function (o) { if (o.sceneTag && o.sceneTag.trim() === tagName) o.sceneTag = ''; }); } }
-                // 从排序记忆中也移除
-                var oi = (dd.tagOrder || []).indexOf(tagName); if (oi !== -1) dd.tagOrder.splice(oi, 1);
-                save(dd);
-                tags.splice(idx, 1);
-                // 同步更新 allOutfits 里的数据
-                allOutfits.forEach(function (o) { if (o.sceneTag && o.sceneTag.trim() === tagName) o.sceneTag = ''; });
-                renderTagList(searchInp.value);
-                toast('标签「' + tagName + '」已删除');
+                var to = fullTags.indexOf(item.dataset.tag);
+                if (dragFrom === null || to === -1 || dragFrom === to) return;
+                var next = fullTags.slice();
+                var moved = next.splice(dragFrom, 1)[0];
+                next.splice(to, 0, moved);
+                dragFrom = null;
+                persistOrder(next);
+                renderList();
             });
         });
     }
 
-    renderTagList('');
+    function renderList() {
+        var tags = groupTags(activeGroup);
+        var q = (searchInp.value || '').trim().toLowerCase();
+        var shown = q ? tags.filter(function (t) { return t.toLowerCase().indexOf(q) !== -1; }) : tags;
+        if (!shown.length) {
+            listEl.innerHTML = '<div class="om-tagpanel-empty">' + (q ? '没有匹配的标签' : '这个分组还没有标签') + '</div>';
+            return;
+        }
+        listEl.innerHTML = shown.map(function (tag) {
+            return '<div class="om-tagpanel-item" data-tag="' + esc(tag) + '" draggable="' + (q ? 'false' : 'true') + '">' +
+                '<i class="fa-solid fa-grip-vertical om-tagpanel-grip"></i>' +
+                '<span class="om-tagpanel-name">' + esc(tag) + '</span>' +
+                '<span class="om-tagpanel-count">' + countTag(activeGroup, tag) + '</span>' +
+                '<button type="button" class="om-tagpanel-del" title="从所有穿搭中删除此标签"><i class="fa-solid fa-trash"></i></button>' +
+                '</div>';
+        }).join('');
+        if (!q) bindDrag(tags);
+        listEl.querySelectorAll('.om-tagpanel-del').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                var item = btn.closest('.om-tagpanel-item');
+                if (item) delTag(item.dataset.tag);
+            });
+        });
+    }
 
-    searchInp.addEventListener('input', function () { renderTagList(this.value); });
-    setTimeout(function () { searchInp.focus(); }, 100);
-
-    // 添加新标签
-    var newInp = sheet.querySelector('#om-tag-new');
-    sheet.querySelector('#om-tag-add').addEventListener('click', function () {
-        var name = newInp.value.trim();
-        if (!name) return;
-        if (tags.indexOf(name) !== -1) { toast('标签已存在', true); return; }
-        tags.push(name);
-        newInp.value = '';
-        renderTagList(searchInp.value);
-        toast('标签「' + name + '」已添加');
+    tabsEl.querySelectorAll('.om-tagpanel-tab').forEach(function (b) {
+        b.addEventListener('click', function () {
+            activeGroup = b.dataset.g;
+            searchInp.value = '';
+            renderTabs();
+            renderList();
+        });
     });
-    newInp.addEventListener('keydown', function (e) { if (e.key === 'Enter') sheet.querySelector('#om-tag-add').click(); });
+    searchInp.addEventListener('input', function () { renderList(); });
+
+    renderTabs();
+    renderList();
 }
 
 function clearKitDraftIfOutfit(outfitId) {
@@ -453,6 +445,118 @@ function buildShowcaseHtml(outfit, part) {
 }
 
 
+// ── 三组标签编辑器（编辑面板内联）────────────────────────
+function buildTagEditorHtml() {
+    return TAG_GROUPS.map(function (g) {
+        return '<div class="om-tagg" data-g="' + g.key + '">' +
+            '<div class="om-tagg-head"><span class="om-tagg-label">' + esc(g.label) + '</span><span class="om-tagg-hint">' + esc(g.hint) + '</span></div>' +
+            '<div class="om-tagg-chips" data-g="' + g.key + '"></div>' +
+            '<div class="om-tagg-add"><input type="text" class="om-tagg-input" data-g="' + g.key + '" placeholder="输入标签后回车" autocomplete="off" /><button type="button" class="om-tagg-addbtn" data-g="' + g.key + '" title="添加"><i class="fa-solid fa-plus"></i></button></div>' +
+            '<div class="om-tagg-sug" data-g="' + g.key + '"></div>' +
+            '</div>';
+    }).join('');
+}
+
+// 跨分区收集所有 outfit 列表（通用衣柜 + 各角色）
+function getAllOutfitLists(d) {
+    var lists = [(d && d.outfits) || []];
+    if (d && d.chars) {
+        for (var cn in d.chars) lists.push(((d.chars[cn] || {}).outfits) || []);
+    }
+    return lists;
+}
+
+// 绑定标签编辑器，返回 { get() → 规范化 tags 对象 }
+function bindTagEditor(sheet, initialTags, suggestions) {
+    var root = sheet.querySelector('#om-tageditor');
+    var values = emptyTags();
+    TAG_GROUP_KEYS.forEach(function (k) {
+        values[k] = normalizeTagList(initialTags && initialTags[k]);
+    });
+
+    function chipsHtml(g) {
+        if (!values[g].length) return '<span class="om-tagg-none">未选择</span>';
+        return values[g].map(function (t) {
+            return '<span class="om-tagg-chip">' + esc(t) +
+                '<button type="button" class="om-tagg-del" data-g="' + g + '" data-tag="' + esc(t) + '"><i class="fa-solid fa-xmark"></i></button></span>';
+        }).join('');
+    }
+
+    function sugHtml(g, filter) {
+        var q = (filter || '').trim().toLowerCase();
+        var list = ((suggestions && suggestions[g]) || []).filter(function (t) {
+            if (values[g].indexOf(t) !== -1) return false;
+            return !q || t.toLowerCase().indexOf(q) !== -1;
+        });
+        if (!list.length) return '';
+        return list.slice(0, 30).map(function (t) {
+            return '<button type="button" class="om-tagg-sugbtn" data-g="' + g + '" data-tag="' + esc(t) + '">' + esc(t) + '</button>';
+        }).join('');
+    }
+
+    function refresh(g) {
+        var chipsEl = sheet.querySelector('.om-tagg-chips[data-g="' + g + '"]');
+        var sugEl = sheet.querySelector('.om-tagg-sug[data-g="' + g + '"]');
+        var inp = sheet.querySelector('.om-tagg-input[data-g="' + g + '"]');
+        if (chipsEl) chipsEl.innerHTML = chipsHtml(g);
+        if (sugEl) sugEl.innerHTML = sugHtml(g, inp ? inp.value : '');
+    }
+
+    function addTag(g, raw) {
+        if (TAG_GROUP_KEYS.indexOf(g) === -1) return false;
+        var one = normalizeTagList([raw]);
+        if (!one.length) return false;
+        if (values[g].indexOf(one[0]) === -1) values[g].push(one[0]);
+        refresh(g);
+        return true;
+    }
+
+    root.addEventListener('click', function (e) {
+        var del = e.target.closest('.om-tagg-del');
+        if (del) {
+            var g1 = del.dataset.g;
+            var i = values[g1].indexOf(del.dataset.tag);
+            if (i !== -1) values[g1].splice(i, 1);
+            refresh(g1);
+            return;
+        }
+        var sug = e.target.closest('.om-tagg-sugbtn');
+        if (sug) { addTag(sug.dataset.g, sug.dataset.tag); return; }
+        var addBtn = e.target.closest('.om-tagg-addbtn');
+        if (addBtn) {
+            var g2 = addBtn.dataset.g;
+            var inp2 = sheet.querySelector('.om-tagg-input[data-g="' + g2 + '"]');
+            if (addTag(g2, inp2 ? inp2.value : '') && inp2) inp2.value = '';
+        }
+    });
+
+    root.querySelectorAll('.om-tagg-input').forEach(function (inp) {
+        inp.addEventListener('input', function () { refresh(inp.dataset.g); });
+        inp.addEventListener('keydown', function (e) {
+            if (e.key !== 'Enter') return;
+            e.preventDefault();
+            if (addTag(inp.dataset.g, inp.value)) inp.value = '';
+            refresh(inp.dataset.g);
+        });
+    });
+
+    TAG_GROUP_KEYS.forEach(refresh);
+
+    return {
+        get: function () {
+            var out = emptyTags();
+            TAG_GROUP_KEYS.forEach(function (k) { out[k] = values[k].slice(); });
+            return out;
+        },
+        set: function (raw) {
+            var next = emptyTags();
+            TAG_GROUP_KEYS.forEach(function (k) { next[k] = normalizeTagList(raw && raw[k]); });
+            TAG_GROUP_KEYS.forEach(function (k) { values[k] = next[k]; refresh(k); });
+        }
+    };
+}
+
+
 function openEditSheet(outfit, defaultCat, defaultSubCat) {
     var d = load(); // still need for tag suggestions (cross-partition)
     var curPart = loadCurrent();
@@ -484,12 +588,10 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
         '<div class="om-field" id="om-subcat-field" style="' + subDisplay + '"><label>子分类</label><div class="om-frow"><select id="om-dsubcat">' + subOpts + '</select><button class="om-btn om-btn-outline" id="om-dnewsubcat" style="white-space:nowrap;font-size:.8em;padding:7px 10px">+ 新建</button></div></div>',
         '<div class="om-field"><label>文字描述 <span class="om-hint">AI 注入用，越详细越好</span></label><textarea id="om-ddesc" rows="4" placeholder="如：白色蕾丝镂空连衣裙，领口略低，裙摆及膝……">' + esc(outfit ? outfit.description || '' : '') + '</textarea>' +
         '<button class="om-btn om-btn-outline" id="om-daidesc" style="font-size:.78em;margin-top:5px;align-self:flex-start"><i class="fa-solid fa-wand-magic-sparkles"></i> AI 生成描述</button></div>',
-        '<div class="om-field"><label>场景标签 <span class="om-hint">多套时 AI 据此选穿搭，如：外出 / 家居 / 睡前</span></label>',
-        '<div style="display:flex;gap:6px;align-items:stretch;">',
-        '<div class="om-suggest-wrap" style="flex:1"><input type="text" id="om-dscene" placeholder="外出 / 家居 / 睡前 / 运动" value="' + esc(outfit ? outfit.sceneTag || '' : '') + '" autocomplete="off" />',
-        '<div class="om-suggest-list" id="om-scene-suggest" style="display:none"></div></div>',
-        '<button class="om-tag-expand-btn" id="om-tag-expand"><i class="fa-solid fa-tags"></i> 管理</button>',
-        '</div></div>',
+        '<div class="om-field"><label>标签 <span class="om-hint">三组都能多选；智能注入和 AI 选穿搭都靠它</span></label>',
+        '<div class="om-tageditor" id="om-tageditor">' + buildTagEditorHtml(outfit) + '</div>',
+        '<button class="om-btn om-btn-outline" id="om-tag-expand" style="font-size:.78em;margin-top:6px;align-self:flex-start"><i class="fa-solid fa-tags"></i> 标签管理</button>',
+        '</div>',
         '<div class="om-field"><label>参考图片 <span class="om-hint">可选，自动压缩，可多张</span></label>',
         '<div class="om-imgarea om-imgs" id="om-dimgarea">' + imageAreaHtml + '</div>',
         '<input type="file" id="om-dfile-album" accept="image/*" multiple style="display:none" />',
@@ -638,28 +740,13 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
         }
     });
 
-    // 场景标签建议
-    var sceneInput = sheet.querySelector('#om-dscene');
-    var suggestList = sheet.querySelector('#om-scene-suggest');
-    var allTags = getAllTagSuggestions(d);
-    function showSuggestions(val) {
-        var v = val.trim().toLowerCase();
-        var filtered = v ? allTags.filter(function (t) { return t.toLowerCase().indexOf(v) !== -1 && t.toLowerCase() !== v; }) : allTags;
-        if (filtered.length === 0) { suggestList.style.display = 'none'; return; }
-        suggestList.innerHTML = filtered.map(function (t) { return '<div class="om-suggest-item" data-val="' + esc(t) + '">' + esc(t) + '</div>'; }).join('');
-        suggestList.style.display = 'block';
-    }
-    sceneInput.addEventListener('focus', function () { showSuggestions(this.value); });
-    sceneInput.addEventListener('input', function () { showSuggestions(this.value); });
-    sceneInput.addEventListener('blur', function () { setTimeout(function () { suggestList.style.display = 'none'; }, 150); });
-    suggestList.addEventListener('mousedown', function (e) {
-        var item = e.target.closest('.om-suggest-item');
-        if (item) { sceneInput.value = item.dataset.val; suggestList.style.display = 'none'; }
-    });
+    // 三组标签编辑器
+    var tagSuggestions = collectTagsByGroup(getAllOutfitLists(d).map(function (list) { return { outfits: list }; }));
+    var tagEditor = bindTagEditor(sheet, outfit ? getOutfitTags(outfit) : emptyTags(), tagSuggestions);
 
     // 标签管理面板按钮
     sheet.querySelector('#om-tag-expand').addEventListener('click', function () {
-        openTagPanel(sceneInput);
+        openTagPanel();
     });
 
     // 图片处理（多图）
@@ -771,6 +858,7 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
             btn.disabled = false; btn.innerHTML = '<i class="fa-solid fa-wand-magic-sparkles"></i> AI 生成描述';
             if (err) { toast('生成失败：' + err, true); return; }
             if (result.description) sheet.querySelector('#om-ddesc').value = result.description;
+            if (result.tags) tagEditor.set(result.tags);
             var nameInp = sheet.querySelector('#om-dn');
             if (result.name && (!nameInp.value.trim() || nameInp.value.trim() === '穿搭')) nameInp.value = result.name;
             toast('✅ 已生成');
@@ -817,18 +905,21 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
         var cat = sheet.querySelector('#om-dcat').value;
         var subCat = sheet.querySelector('#om-dsubcat').value;
         var desc = sheet.querySelector('#om-ddesc').value.trim();
-        var scene = sheet.querySelector('#om-dscene').value.trim();
+        var tags = tagEditor.get();
         var curP = loadCurrent();
         if (outfit) {
             // 编辑已有穿搭 - 在当前 partition 中查找
             for (var i = 0; i < curP.outfits.length; i++) {
                 if (curP.outfits[i].id === outfit.id) {
-                    Object.assign(curP.outfits[i], { name: name, category: cat, subCategory: subCat, description: desc, sceneTag: scene, images: editImgs.slice(), imageData: editImgs[0] || null }); break;
+                    Object.assign(curP.outfits[i], { name: name, category: cat, subCategory: subCat, description: desc, images: editImgs.slice(), imageData: editImgs[0] || null });
+                    setOutfitTags(curP.outfits[i], tags);
+                    break;
                 }
             }
         } else {
             // 新增穿搭 - 放入当前 partition
-            var newOutfit = { id: genId(), name: name, category: cat, subCategory: subCat, description: desc, sceneTag: scene, images: editImgs.slice(), imageData: editImgs[0] || null, kits: [], activeKitId: null, createdAt: Date.now() };
+            var newOutfit = { id: genId(), name: name, category: cat, subCategory: subCat, description: desc, tags: tags, images: editImgs.slice(), imageData: editImgs[0] || null, kits: [], activeKitId: null, createdAt: Date.now() };
+            setOutfitTags(newOutfit, tags);
             curP.outfits.unshift(newOutfit);
         }
         saveCurrent(curP); closeSheet(sheet); toast('✨ 已保存：' + name); fn.renderCatbar(); fn.renderGrid(); fn.renderBottomStatus(); fn.updateBtn();

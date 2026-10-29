@@ -3,7 +3,7 @@
 // v2: 使用 loadMeta() + loadActivePartitions() 代替旧 load() 全量读取
 
 import { loadMeta, loadActivePartitions, currentUserPartKey, charNameById } from './db.js';
-import { SHARED_CHAR_KEY, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount } from './data.js';
+import { SHARED_CHAR_KEY, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags } from './data.js';
 import { toast } from './utils.js';
 import { state } from './bridge.js';
 
@@ -14,6 +14,17 @@ var recentInjectedBodies = [];
 // 随机注入缓存（仅通用衣柜）：首次注入随机选取若干项生成缓存切片，后续注入复用
 // { sig: activeIds.join(','), outfits: [...] }；sig 变化时重新生成
 var sharedRandomCache = null;
+
+// 三组标签 → 注入用短串：【场景：通勤 / 约会】【服装：衬衫、百褶裙】【气质：干练】
+function buildTagLine(o) {
+    var t = getOutfitTags(o);
+    var parts = [];
+    if (t.scene.length) parts.push('【场景：' + t.scene.join(' / ') + '】');
+    if (t.garment.length) parts.push('【服装：' + t.garment.join('、') + '】');
+    if (t.impression.length) parts.push('【气质：' + t.impression.join('、') + '】');
+    if (!parts.length && o && o.sceneTag && o.sceneTag.trim()) parts.push('【场景：' + o.sceneTag.trim() + '】');
+    return parts.join('');
+}
 
 // 从列表中随机抽取 n 项（Fisher-Yates 部分洗牌），返回新数组，不修改入参
 function pickRandomOutfits(outs, n) {
@@ -123,7 +134,7 @@ function injectImageBlocks(p, ownerImageGroups, imgPrompt, multiImgPrompt) {
                     grp.outfits.forEach(function (o, i) {
                         var urls = getInjectImageUrls(o);
                         if (urls.length === 0) return;
-                        c.push({ type: 'text', text: '\n(穿搭' + (i + 1) + ')' + (o.sceneTag ? ' [场景：' + o.sceneTag + ']' : '') + '：' });
+                        c.push({ type: 'text', text: '\n(穿搭' + (i + 1) + ')' + (buildTagLine(o) ? ' ' + buildTagLine(o) : '') + '：' });
                         urls.forEach(function (url) {
                             c.push({ type: 'image_url', image_url: { url: url } });
                         });
@@ -377,7 +388,7 @@ function tryInjectPayload(p) {
 
         if (isMulti) {
             var lines = active.map(function (o, i) {
-                var scene = o.sceneTag ? '【场景：' + o.sceneTag + '】' : '';
+                var scene = buildTagLine(o);
                 var desc = (o.description && o.description.trim()) ? o.description.trim() : '';
                 var accText = buildAccText(ow.partition, o);
                 return '[穿搭' + (i + 1) + '] ' + scene + (desc ? '\n' + desc : '') + accText;
