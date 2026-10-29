@@ -1,1 +1,7 @@
 _preview/
+_chrprof*/
+_preview/
+.synt/
+_cdp*.cjs
+_gallery-work/
+*.log
