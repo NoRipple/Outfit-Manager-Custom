@@ -109,7 +109,7 @@ var CARD_H_COMPACT = 104;
 
 function cardHeight() {
     var el = document.getElementById(WIN_ID);
-    return (el && el.classList.contains('om-act-compact')) ? CARD_H_COMPACT : CARD_H;
+    return (el && el.classList.contains('om-act-compact')) ? CARD_H_COMPACT : 0;
 }
 
 function cardBg(o, thumb) {
@@ -126,9 +126,9 @@ function cardHtml(item, idx, H) {
     var tagText = tagLineText(o);
     var worn = getWorn()[o.id];
     var num = ('0' + (idx + 1)).slice(-2);
-    var h = H || CARD_H;
+    var h = H || 0;
     return '<div class="om-act-card' + (worn ? ' om-act-card-worn' : '') + '" data-idx="' + idx + '"' +
-        ' style="height:' + h + 'px;background-image:' + cardBg(o, thumb) + ';">' +
+        ' style="height:' + (h ? h + 'px' : 'auto') + ';background-image:' + cardBg(o, thumb) + ';">' +
         '<span class="om-act-idx">' + num + '</span>' +
         (worn ? '<span class="om-act-wornmark"><i class="fa-solid fa-check"></i></span>' : '') +
         '<div class="om-act-info" style="color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.65);">' +
@@ -143,9 +143,15 @@ function cardHtml(item, idx, H) {
 function applyCardHeights() {
     var el = document.getElementById(WIN_ID);
     if (!el) return;
-    var h = cardHeight();
+    var compact = el.classList.contains('om-act-compact');
     var cards = el.querySelectorAll('.om-act-card');
-    for (var i = 0; i < cards.length; i++) cards[i].style.height = h + 'px';
+    for (var i = 0; i < cards.length; i++) {
+        var c = cards[i];
+        if (compact) { c.style.height = CARD_H_COMPACT + 'px'; continue; }
+        c.style.height = 'auto';
+        var w = c.clientWidth || 0;
+        if (w > 0) c.style.height = Math.round(w * 4 / 3) + 'px';
+    }
 }
 
 var _lastItems = [];
