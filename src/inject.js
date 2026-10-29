@@ -249,8 +249,10 @@ function tryInjectPayload(p) {
     var meta = loadMeta();
     if (meta.injectEnabled === false) return null;  // 注入总开关：关闭时跳过注入
     var pos = meta.injectPosition || 'user';
-    var useImg = (meta.mode === 'image' || meta.mode === 'both');
-    var useText = (meta.mode === 'text' || meta.mode === 'both');
+    var injectMode = meta.injectMode || 'tag_text';
+    var useImg = (injectMode === 'tag_text_image');
+    var useText = (injectMode === 'tag_text' || injectMode === 'tag_text_image');
+    var tagOnly = (injectMode === 'tag');
 
     // 获取所有有激活穿搭的 partition（已预加载，同步读取）
     var activeParts = loadActivePartitions();
@@ -393,6 +395,12 @@ function tryInjectPayload(p) {
                 var accText = buildAccText(ow.partition, o);
                 return '[穿搭' + (i + 1) + '] ' + scene + (desc ? '\n' + desc : '') + accText;
             });
+            if (tagOnly) {
+                // 仅标签：只发「[穿搭N] 【场景…】【服装…】【气质…】」，不发描述与单品细节
+                allTextParts.push(active.map(function (o, i) {
+                    return '[穿搭' + (i + 1) + '] ' + buildTagLine(o);
+                }).join('\n'));
+            }
             if (useText) {
                 var wt = (ow.tplMulti || '[服装信息]\n{{charName}}的穿搭：\n{{wardrobe}}')
                     .replace(/\{\{charName\}\}/g, ow.name)
@@ -405,11 +413,14 @@ function tryInjectPayload(p) {
             }
         } else {
             var o = active[0];
+            if (tagOnly) allTextParts.push('[' + ow.name + '当前穿着] ' + buildTagLine(o));
             if (useText) {
                 var desc2 = (o.description && o.description.trim()) ? o.description.trim() : '';
                 var accText2 = buildAccText(ow.partition, o);
-                if (desc2 || accText2) {
-                    var fullDesc = desc2 + accText2;
+                var tagLine2 = buildTagLine(o);
+                if (tagLine2 || desc2 || accText2) {
+                    // 标签永远带在前面（单套模式下以前漏了标签）
+                    var fullDesc = (tagLine2 ? tagLine2 + '\n' : '') + desc2 + accText2;
                     var st = (ow.tplSingle || '[服装信息]\n{{charName}}当前穿着：\n{{description}}')
                         .replace(/\{\{charName\}\}/g, ow.name)
                         .replace('{{description}}', fullDesc);
@@ -442,7 +453,7 @@ function tryInjectPayload(p) {
 
     if (meta.debug) {
         var summary = owners.map(function (ow) { return ow.name + ':' + ow.outfits.length + '套'; }).join(' + ');
-        toast('👗 ' + summary + ' [' + meta.mode + '|' + pos + ']');
+        toast('👗 ' + summary + ' [' + injectMode + '|' + pos + ']');
     }
 
     if (injected) markPayloadInjected(p);

@@ -382,6 +382,8 @@ export function renderOutfitGrid(area, part) {
                 '<div class="om-batch-acts">' +
                 '<button class="om-batch-btn" id="om-batch-selall">全选</button>' +
                 '<button class="om-batch-btn" id="om-batch-none">取消</button>' +
+                '<button class="om-batch-btn" id="om-batch-actall"><i class="fa-solid fa-check-double"></i> 全选激活</button>' +
+                '<button class="om-batch-btn" id="om-batch-actsel"><i class="fa-solid fa-circle-check"></i> 激活选中</button>' +
                 '<button class="om-batch-btn" id="om-batch-cat"><i class="fa-solid fa-folder"></i> 分类</button>' +
                 '<button class="om-batch-btn" id="om-batch-move"><i class="fa-solid fa-arrow-right-arrow-left"></i> 移动</button>' +
                 '<button class="om-batch-btn" id="om-batch-tag"><i class="fa-solid fa-tag"></i> 标签</button>' +
@@ -474,6 +476,19 @@ export function renderOutfitGrid(area, part) {
 
         if (selall) selall.addEventListener('click', function () { state.batchSelected = list.map(function (o) { return o.id; }); fn.renderGrid(); });
         if (selnone) selnone.addEventListener('click', function () { state.batchSelected = []; fn.renderGrid(); });
+        var bactAll = batchArea.querySelector('#om-batch-actall');
+        var bactSel = batchArea.querySelector('#om-batch-actsel');
+        if (bactAll) bactAll.addEventListener('click', function () {
+            var curP = loadCurrent();
+            var ids = (curP.outfits || []).map(function (o) { return o.id; });
+            if (ids.length === 0) { toast('这个衣柜还没有穿搭', true); return; }
+            if (ids.length > 50 && !window.confirm('这个衣柜有 ' + ids.length + ' 套穿搭，全部激活后都会注入给 AI，确定吗？')) return;
+            applyActiveIds(ids, '✅ 已激活全部 ' + ids.length + ' 套');
+        });
+        if (bactSel) bactSel.addEventListener('click', function () {
+            if (state.batchSelected.length === 0) { toast('请先选择穿搭', true); return; }
+            applyActiveIds(state.batchSelected.slice(), '✅ 已激活选中的 ' + state.batchSelected.length + ' 套');
+        });
         var bcatBtn = batchArea.querySelector('#om-batch-cat');
         if (bcatBtn) bcatBtn.addEventListener('click', function () {
             if (state.batchSelected.length === 0) { toast('请先选择穿搭', true); return; }
@@ -733,6 +748,42 @@ export function renderOutfitGrid(area, part) {
             });
         });
     }
+}
+
+// ── 一键激活（全选激活 / 激活选中）──────────────────────────
+function applyActiveIds(ids, msg) {
+    var curP = loadCurrent();
+    curP.activeIds = ids.slice();
+    // 通用衣柜 ↔ 单人衣柜互斥（与单击卡片保持一致）
+    var m = loadMeta();
+    if (m.currentView === 'char' && ids.length > 0) {
+        if (m.currentChar === SHARED_CHAR_KEY) {
+            (m.charIndex || []).forEach(function (ci) {
+                if (ci.id === SHARED_CHAR_KEY) return;
+                var cp = loadPartition(ci.partKey);
+                if (cp.activeIds && cp.activeIds.length > 0) {
+                    cp.activeIds = [];
+                    savePartition(ci.partKey, cp);
+                    syncActivePartitions(ci.partKey, []);
+                }
+            });
+        } else {
+            var sharedPK = 'char:' + SHARED_CHAR_KEY;
+            var sp = loadPartition(sharedPK);
+            if (sp.activeIds && sp.activeIds.length > 0) {
+                sp.activeIds = [];
+                savePartition(sharedPK, sp);
+                syncActivePartitions(sharedPK, []);
+            }
+        }
+    }
+    saveCurrent(curP);
+    syncActivePartitions(currentPartKey(), curP.activeIds);
+    if (fn && fn.updateBtn) fn.updateBtn();
+    renderBottomStatus();
+    preResolveActiveImages();
+    if (fn && fn.renderGrid) fn.renderGrid();
+    if (msg) toast(msg);
 }
 
 // ── 底栏状态（使用 loadActivePartitions 跨分包显示）────────

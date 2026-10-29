@@ -63,9 +63,24 @@ export function normalizeEndpoint(raw, path) {
     } catch (e) { return raw + path; }
 }
 
+// 跨域请求走酒馆自带的反向代理，绕过浏览器 CORS（本地大模型服务多半不发 CORS 头）
+function withProxy(url, apiCfg) {
+    if (!apiCfg || !apiCfg.useProxy) return url;
+    try {
+        var abs = new URL(url, location.href);
+        if (abs.origin === location.origin) return url;
+        return location.origin + '/proxy/' + abs.href;
+    } catch (e) { return url; }
+}
+
+// 组装最终请求地址：端点 + 路径，必要时套一层代理
+export function resolveApiUrl(apiCfg, path) {
+    return withProxy(normalizeEndpoint(apiCfg.endpoint, path), apiCfg);
+}
+
 // ── 获取模型列表 ─────────────────────────────────────────
 export function fetchModelList(apiCfg, cb) {
-    var url = normalizeEndpoint(apiCfg.endpoint, '/v1/models');
+    var url = resolveApiUrl(apiCfg, '/v1/models');
     fetch(url, {
         headers: { 'Authorization': 'Bearer ' + apiCfg.key, 'X-OM-Internal': '1' }
     }).then(function (r) {
@@ -278,7 +293,7 @@ function validateClassificationResult(parsed, categories, fallback) {
 
 // ── 单次 Vision API 调用 ─────────────────────────────────
 export function callVisionAPI(apiCfg, image, systemPrompt, cb) {
-    var url = normalizeEndpoint(apiCfg.endpoint, '/v1/chat/completions');
+    var url = resolveApiUrl(apiCfg, '/v1/chat/completions');
     // image 传 null 时走纯文本请求（标签分析可以只靠名称和描述）
     var content = [];
     if (image && image.dataUrl) {

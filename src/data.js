@@ -38,6 +38,14 @@ export function upgradeLegacyVisionPrompt(apiVision) {
     return apiVision;
 }
 
+// ── 注入内容类型（标签永远带；区别在文字与图片）──
+export var INJECT_MODES = ['tag', 'tag_text', 'tag_text_image'];
+export var INJECT_MODE_LABELS = {
+    tag: '仅标签',
+    tag_text: '标签 + 文字',
+    tag_text_image: '标签 + 文字 + 图片'
+};
+
 // ── meta 默认值（全局设置 + 索引 + 激活追踪）──
 export function defMeta() {
     return {
@@ -67,6 +75,7 @@ export function defMeta() {
 
         // 注入配置
         mode: 'text',
+        injectMode: 'tag_text',     // 发送内容：tag 仅标签 / tag_text 标签+文字 / tag_text_image 标签+文字+图片
         injectEnabled: true,
         injectPosition: 'user',
         // 随机注入（仅对通用衣柜生效）
@@ -88,7 +97,8 @@ export function defMeta() {
             tagPrompt: TAG_PROMPT_DEFAULT,
             promptTemplates: [],
             activePromptTemplateId: null,
-            overwrite: false
+            overwrite: false,
+            useProxy: false          // 跨域请求走酒馆反向代理（本地大模型服务没开 CORS 时用）
         }
     };
 }
@@ -111,6 +121,11 @@ export function defPartition() {
 export function ensureMetaDefaults(m) {
     var dm = defMeta();
     if (!m) return dm;
+    // 旧配置迁移：以前只有 mode(text/image/both)，转成新的 injectMode
+    if (m.injectMode === undefined) {
+        m.injectMode = (m.mode === 'image' || m.mode === 'both') ? 'tag_text_image' : 'tag_text';
+    }
+    if (INJECT_MODES.indexOf(m.injectMode) === -1) m.injectMode = 'tag_text';
     for (var k in dm) { if (m[k] === undefined) m[k] = dm[k]; }
     if (!Array.isArray(m.presets)) m.presets = [];
     if (!Array.isArray(m.charIndex)) m.charIndex = [];

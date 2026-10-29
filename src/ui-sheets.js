@@ -1438,10 +1438,10 @@ function openSettingsSheet() {
 
         '<div class="om-sec-title">发送内容</div>',
         '<div class="om-setting-row om-row-inline"><label>启用注入 <span class="om-hint">关闭后暂停把穿搭信息注入给 AI</span></label><input type="checkbox" class="om-chk" id="om-inject-enabled"' + (d.injectEnabled !== false ? ' checked' : '') + ' /></div>',
-        '<div class="om-setting-row"><label>发送给 AI 的内容类型</label><select id="om-mode">',
-        '<option value="text"' + (d.mode === 'text' ? ' selected' : '') + '>仅文字描述</option>',
-        '<option value="image"' + (d.mode === 'image' ? ' selected' : '') + '>仅图片</option>',
-        '<option value="both"' + (d.mode === 'both' ? ' selected' : '') + '>文字 + 图片</option>',
+        '<div class="om-setting-row"><label>发送给 AI 的内容类型 <span class="om-hint">标签始终会发送，区别在文字和图片</span></label><select id="om-inject-mode">',
+        '<option value="tag_text_image"' + (d.injectMode === 'tag_text_image' ? ' selected' : '') + '>标签 + 文字 + 图片</option>',
+        '<option value="tag_text"' + (d.injectMode === 'tag_text' || !d.injectMode ? ' selected' : '') + '>标签 + 文字</option>',
+        '<option value="tag"' + (d.injectMode === 'tag' ? ' selected' : '') + '>仅标签</option>',
         '</select></div>',
 
         '<div class="om-setting-row"><label>注入位置 <span class="om-hint">Gemini/DeepSeek 建议选\"用户消息\"</span></label><select id="om-inject-pos">',
@@ -1491,6 +1491,7 @@ function openSettingsSheet() {
         '<div class="om-setting-row"><label>Prompt 模板</label><select id="om-api-v-template" style="background:rgba(127,127,127,.08);border:1px solid rgba(127,127,127,.2);border-radius:8px;color:inherit;padding:7px 10px;font-size:.85em;width:100%;box-sizing:border-box;font-family:inherit">' + buildPromptTemplateOptions(d.apiVision) + '</select></div>',
         '<div class="om-btn-row" style="margin-top:6px"><button class="om-btn om-btn-outline" id="om-api-v-template-save" style="font-size:.78em;flex:1 1 110px"><i class="fa-solid fa-floppy-disk"></i> 保存当前</button><button class="om-btn om-btn-outline" id="om-api-v-template-ren" style="font-size:.78em;flex:1 1 90px"><i class="fa-solid fa-pen"></i> 重命名</button><button class="om-btn om-btn-outline" id="om-api-v-template-del" style="font-size:.78em;flex:1 1 90px"><i class="fa-solid fa-trash"></i> 删除</button></div>',
         '<div class="om-setting-row om-row-inline"><label>覆盖已有描述</label><input type="checkbox" class="om-chk" id="om-api-v-overwrite"' + (d.apiVision.overwrite ? ' checked' : '') + ' /></div>',
+        '<div class="om-setting-row om-row-inline"><label>通过酒馆代理发送 <span class="om-hint">本地大模型服务（如 127.0.0.1:3425）报 Failed to fetch 时打开，走酒馆自带的反向代理绕过 CORS</span></label><input type="checkbox" class="om-chk" id="om-api-v-proxy"' + (d.apiVision.useProxy ? ' checked' : '') + ' /></div>',
         '<div class="om-btn-row" style="margin-top:6px"><button class="om-btn om-btn-outline" id="om-api-v-test" style="font-size:.8em"><i class="fa-solid fa-flask-vial"></i> 测试连接</button></div>',
 
         '<div class="om-divider"></div>',
@@ -1531,7 +1532,7 @@ function openSettingsSheet() {
         '<div class="om-setting-row om-row-inline"><label>注入时显示 Toast 提示</label><input type="checkbox" class="om-chk" id="om-debug"' + (d.debug ? ' checked' : '') + ' /></div>',
     ].join(''));
 
-    sheet.querySelector('#om-mode').addEventListener('change', function () { var m = loadMeta(); m.mode = this.value; saveMeta(m); });
+    sheet.querySelector('#om-inject-mode').addEventListener('change', function () { var m = loadMeta(); m.injectMode = this.value; saveMeta(m); });
     sheet.querySelector('#om-inject-enabled').addEventListener('change', function () {
         var m = loadMeta(); m.injectEnabled = this.checked; saveMeta(m);
         // 同步重建悬浮球，刷新注入快捷开关状态
@@ -1568,6 +1569,7 @@ function openSettingsSheet() {
     sheet.querySelector('#om-api-v-acc-prompt').addEventListener('input', function () { var m = loadMeta(); m.apiVision.accPrompt = this.value; saveMeta(m); });
     sheet.querySelector('#om-api-v-tag-prompt').addEventListener('input', function () { var m = loadMeta(); m.apiVision.tagPrompt = this.value; saveMeta(m); });
     sheet.querySelector('#om-api-v-overwrite').addEventListener('change', function () { var m = loadMeta(); m.apiVision.overwrite = this.checked; saveMeta(m); });
+    sheet.querySelector('#om-api-v-proxy').addEventListener('change', function () { var m = loadMeta(); m.apiVision.useProxy = this.checked; saveMeta(m); });
 
     function refreshPromptTemplateSelect() {
         var m = loadMeta();
