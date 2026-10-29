@@ -147,7 +147,17 @@ async function run() {
     assert.equal(noMark.indexOf('<Outfit-Manager-Custom>'), -1, '标记提示：关闭后不应包含标记说明');
     delete meta.markerEnabled;
 
-    console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示)');
+    // ── 纯文本模型（DeepSeek）自动降级：即使选了「标签+文字+图片」也不塞图片 ──
+    meta.injectMode = 'tag_text_image';
+    captured = null;
+    const dsBody = JSON.stringify({ model: 'deepseek-chat', messages: [{ role: 'user', content: '纯文本模型：G' }] });
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: dsBody });
+    assert.ok(captured, '降级：应捕获请求体');
+    assert.equal(captured.indexOf('image_url'), -1, '降级：deepseek 模型不应注入图片块');
+    assert.ok(captured.indexOf('【场景：通勤】') !== -1, '降级：仍应带标签');
+    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1, '降级：仍应带描述文字');
+
+    console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示 / 纯文本模型降级)');
 }
 
 run().catch((err) => {

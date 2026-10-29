@@ -26,6 +26,19 @@ function buildTagLine(o) {
     return parts.join('');
 }
 
+// 判断当前聊天模型是否能吃图片：DeepSeek 官方接口只收文本，塞 image_url 会直接 400
+var imageFallbackToasted = false;
+function modelLikelyTextOnly(modelName) {
+    var m = String(modelName || '').toLowerCase();
+    if (!m) return false;
+    if (m.indexOf('vl') !== -1 || m.indexOf('vision') !== -1) return false;
+    var textOnly = ['deepseek', 'o1-mini', 'gpt-3.5', 'text-davinci', 'glm-4-flash'];
+    for (var i = 0; i < textOnly.length; i++) {
+        if (m.indexOf(textOnly[i]) !== -1) return true;
+    }
+    return false;
+}
+
 // 让 AI 在回复末尾标注本楼用到的穿搭（正文标记格式）
 function buildMarkerHint(owners) {
     var list = [];
@@ -267,6 +280,15 @@ function tryInjectPayload(p) {
     var useImg = (injectMode === 'tag_text_image');
     var useText = (injectMode === 'tag_text' || injectMode === 'tag_text_image');
     var tagOnly = (injectMode === 'tag');
+
+    // 当前聊天模型不收图片（如 DeepSeek 官方接口）时，自动降级为「标签 + 文字」，避免 400
+    if (useImg && modelLikelyTextOnly(p.model)) {
+        useImg = false;
+        if (!imageFallbackToasted) {
+            imageFallbackToasted = true;
+            toast('当前模型「' + p.model + '」不支持图片输入，已自动改用「标签 + 文字」发送。可在设置里把内容类型改成「标签 + 文字」以消除此提示。');
+        }
+    }
 
     // 获取所有有激活穿搭的 partition（已预加载，同步读取）
     var activeParts = loadActivePartitions();
