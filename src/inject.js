@@ -26,6 +26,20 @@ function buildTagLine(o) {
     return parts.join('');
 }
 
+// 让 AI 在回复末尾标注本楼用到的穿搭（正文标记格式）
+function buildMarkerHint(owners) {
+    var list = [];
+    owners.forEach(function (ow) {
+        var names = (ow.outfits || []).slice(0, 12).map(function (o) { return (o.name || '').trim(); }).filter(Boolean);
+        if (names.length) list.push(ow.name + ' → ' + names.join('、'));
+    });
+    if (!list.length) return '';
+    var sample = owners.length ? ((owners[0].outfits && owners[0].outfits[0] && owners[0].outfits[0].name) || '穿搭名称') + '/' + owners[0].name : '穿搭名称/角色';
+    return '\n\n【穿搭标注】本楼回复的最后另起一行，用 <Outfit-Manager-Custom>名称/角色</Outfit-Manager-Custom> 标出这一楼实际用到的穿搭，' +
+        '多套用 + 连接，例如 <Outfit-Manager-Custom>' + sample + '</Outfit-Manager-Custom>；名称必须与下面的清单完全一致，角色写衣柜主人。可用：' +
+        list.join('；') + '。';
+}
+
 // 从列表中随机抽取 n 项（Fisher-Yates 部分洗牌），返回新数组，不修改入参
 function pickRandomOutfits(outs, n) {
     if (!outs || outs.length === 0) return [];
@@ -432,6 +446,7 @@ function tryInjectPayload(p) {
     });
 
     var injected = false;
+    var markerHint = (meta.markerEnabled !== false) ? buildMarkerHint(owners) : '';
 
     if (allTextParts.length > 0) {
         var mergedText;
@@ -440,7 +455,11 @@ function tryInjectPayload(p) {
         } else {
             mergedText = '=== 当前场景服装信息（必须严格遵守，不可自行编造服装）===\n\n' + allTextParts.join('\n\n---\n\n') + '\n\n=== 服装信息结束 ===';
         }
+        if (markerHint) mergedText += markerHint;
         injectText(p, mergedText, pos);
+        injected = true;
+    } else if (markerHint) {
+        injectText(p, markerHint.replace(/^\n+/, ''), pos);
         injected = true;
     }
 

@@ -1,1 +1,1 @@
-export var OM_VERSION = '2.6.0';
+export var OM_VERSION = '2.6.1';

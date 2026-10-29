@@ -77,6 +77,7 @@ export function defMeta() {
         mode: 'text',
         injectMode: 'tag_text',     // 发送内容：tag 仅标签 / tag_text 标签+文字 / tag_text_image 标签+文字+图片
         injectEnabled: true,
+        markerEnabled: true,        // 要求 AI 在回复末尾标注本楼用到的穿搭（正文标记）
         injectPosition: 'user',
         // 随机注入（仅对通用衣柜生效）
         randomInject: false,

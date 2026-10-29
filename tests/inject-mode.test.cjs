@@ -134,7 +134,20 @@ async function run() {
     assert.ok(captured.indexOf('【场景：通勤】') !== -1, '旧配置：应默认带标签');
     assert.equal(captured.indexOf('image_url'), -1, '旧配置：默认不注入图片');
 
-    console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认)');
+    // ── 正文穿搭标记提示（markerEnabled） ──
+    meta.injectMode = 'tag_text';
+    meta.markerEnabled = true;
+    const withMark = await injectOnce('tag_text', 'E');
+    assert.ok(withMark.indexOf('<Outfit-Manager-Custom>') !== -1, '标记提示：应包含正文标记说明');
+    assert.ok(withMark.indexOf('测试穿搭') !== -1, '标记提示：应列出可用穿搭名称');
+    assert.ok(withMark.indexOf('Alice') !== -1, '标记提示：应带上衣柜主人名');
+
+    meta.markerEnabled = false;
+    const noMark = await injectOnce('tag_text', 'F');
+    assert.equal(noMark.indexOf('<Outfit-Manager-Custom>'), -1, '标记提示：关闭后不应包含标记说明');
+    delete meta.markerEnabled;
+
+    console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示)');
 }
 
 run().catch((err) => {

@@ -684,7 +684,7 @@ function reassembleFullData() {
 
     // 设置字段
     var settingsKeys = [
-        'mode', 'injectMode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'currentChar'
@@ -1264,7 +1264,7 @@ function migrateFromV1(oldData, cb) {
 
     // ── 提取设置到 meta ──
     var settingsKeys = [
-        'mode', 'injectMode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView'
@@ -1458,7 +1458,7 @@ function splitServerDataToPartitions(serverData, cb) {
     var entries = [];
 
     var settingsKeys = [
-        'mode', 'injectMode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView'
@@ -1799,6 +1799,7 @@ function validateMetaPayload(data) {
         if (data[stringSettings[settingIndex]] !== undefined && typeof data[stringSettings[settingIndex]] !== 'string') return 'meta.' + stringSettings[settingIndex] + ' 类型无效';
     }
     if (data.debug !== undefined && typeof data.debug !== 'boolean') return 'meta.debug 类型无效';
+    if (data.markerEnabled !== undefined && typeof data.markerEnabled !== 'boolean') return 'meta.markerEnabled 类型无效';
     if (data.showBall !== undefined && typeof data.showBall !== 'boolean') return 'meta.showBall 类型无效';
     if (data.fabSize !== undefined && (typeof data.fabSize !== 'number' || !Number.isFinite(data.fabSize))) return 'meta.fabSize 类型无效';
     if (data.tagOrder !== undefined && (!Array.isArray(data.tagOrder) || data.tagOrder.some(function (item) { return typeof item !== 'string'; }))) return 'meta.tagOrder 类型无效';
@@ -2163,7 +2164,7 @@ export function load() {
     var d = {};
     // meta 设置字段
     var metaKeys = [
-        'mode', 'injectMode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'activePresetId'
@@ -2242,7 +2243,7 @@ export function save(d) {
 
     // ── 1. meta 设置字段 ──
     var settingsKeys = [
-        'mode', 'injectMode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'activePresetId'

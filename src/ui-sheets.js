@@ -1443,6 +1443,7 @@ function openSettingsSheet() {
         '<option value="tag_text"' + (d.injectMode === 'tag_text' || !d.injectMode ? ' selected' : '') + '>标签 + 文字</option>',
         '<option value="tag"' + (d.injectMode === 'tag' ? ' selected' : '') + '>仅标签</option>',
         '</select></div>',
+        '<div class="om-setting-row om-row-inline"><label>要求 AI 标注本楼穿搭 <span class="om-hint">在注入内容里附名称清单，让 AI 回复末尾输出 &lt;Outfit-Manager-Custom&gt;名称/角色+…&lt;/Outfit-Manager-Custom&gt;，插件会把它渲染成可点卡片</span></label><input type="checkbox" class="om-chk" id="om-marker-enabled"' + (d.markerEnabled !== false ? ' checked' : '') + ' /></div>',
 
         '<div class="om-setting-row"><label>注入位置 <span class="om-hint">Gemini/DeepSeek 建议选\"用户消息\"</span></label><select id="om-inject-pos">',
         '<option value="system"' + (d.injectPosition === 'system' ? ' selected' : '') + '>系统提示末尾</option>',
@@ -1533,6 +1534,7 @@ function openSettingsSheet() {
     ].join(''));
 
     sheet.querySelector('#om-inject-mode').addEventListener('change', function () { var m = loadMeta(); m.injectMode = this.value; saveMeta(m); });
+    sheet.querySelector('#om-marker-enabled').addEventListener('change', function () { var m = loadMeta(); m.markerEnabled = this.checked; saveMeta(m); });
     sheet.querySelector('#om-inject-enabled').addEventListener('change', function () {
         var m = loadMeta(); m.injectEnabled = this.checked; saveMeta(m);
         // 同步重建悬浮球，刷新注入快捷开关状态
@@ -2006,7 +2008,7 @@ function openLightbox(outfits, startId) {
     var lb = document.createElement('div');
     lb.id = 'om-lightbox';
     lb.className = 'om-lightbox';
-    lb.style.cssText = 'position:absolute !important;inset:0 !important;z-index:2 !important;pointer-events:auto !important;background:rgba(0,0,0,.92) !important;display:flex !important;align-items:center !important;justify-content:center !important;';
+    lb.style.cssText = 'position:fixed !important;inset:0 !important;z-index:2147483600 !important;pointer-events:auto !important;background:rgba(0,0,0,.92) !important;display:flex !important;align-items:center !important;justify-content:center !important;';
 
     function render() {
         var it = items[idx];
@@ -2031,7 +2033,8 @@ function openLightbox(outfits, startId) {
     }
     document.addEventListener('keydown', keyH);
     render();
-    getPopupLayer().appendChild(lb);
+    // 挂到 body 上：挂进插件弹层会被对话区盖住
+    document.body.appendChild(lb);
     lb.style.setProperty('pointer-events', 'auto', 'important');
 }
 
