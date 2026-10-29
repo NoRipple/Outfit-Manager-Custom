@@ -6,6 +6,7 @@ import { loadMeta, loadActivePartitions, currentUserPartKey, charNameById } from
 import { SHARED_CHAR_KEY, partGetById, getOutfitThumb, getOutfitImages, getOutfitTags, garmentItemText } from './data.js';
 import { esc } from './utils.js';
 import { fn } from './bridge.js';
+import { getWorn } from './msg-tag.js';
 
 var WIN_ID = 'om-active-win';
 var BTN_ID = 'om-active-ext-btn';
@@ -83,11 +84,14 @@ function cardHtml(item, idx) {
     var imgs = getOutfitImages(o);
     var thumb = getOutfitThumb(o) || imgs[0] || '';
     var tagText = tagLineText(o);
-    return '<div class="om-act-card" data-idx="' + idx + '">' +
+    var worn = getWorn()[o.id];
+    return '<div class="om-act-card' + (worn ? ' om-act-card-worn' : '') + '" data-idx="' + idx + '">' +
         '<div class="om-act-thumb">' +
             (thumb ? '<img src="' + esc(thumb) + '" alt="" loading="lazy" />' : '<span class="om-act-noimg"><i class="fa-solid fa-shirt"></i></span>') +
+            (worn ? '<span class="om-act-wornmark"><i class="fa-solid fa-check"></i></span>' : '') +
         '</div>' +
         '<div class="om-act-info">' +
+            (worn ? '<div class="om-act-worn"><i class="fa-solid fa-shirt"></i> 本楼穿着 · ' + esc(worn.owner || item.owner) + '</div>' : '') +
             '<div class="om-act-owner" title="' + esc(item.owner) + '">' + esc(item.owner) + '</div>' +
             '<div class="om-act-name" title="' + esc(o.name || '') + '">' + esc(o.name || '未命名穿搭') + '</div>' +
             (tagText ? '<div class="om-act-tags">' + esc(tagText) + '</div>' : '') +
@@ -103,6 +107,13 @@ function renderBody() {
     var body = el.querySelector('#om-act-body');
     var countEl = el.querySelector('#om-act-count');
     var items = collectActive();
+    var wornMap = getWorn();
+    // 本楼穿着的排在最上面
+    items.sort(function (a, b) {
+        var wa = wornMap[a.outfit.id] ? 1 : 0;
+        var wb = wornMap[b.outfit.id] ? 1 : 0;
+        return wb - wa;
+    });
     _lastItems = items;
     _lastSig = items.map(function (it) { return it.outfit.id; }).join(',');
     if (countEl) countEl.textContent = items.length ? '共 ' + items.length + ' 套' : '';
@@ -169,6 +180,15 @@ function refreshIfOpen() {
 }
 var _lastSig = '';
 
+// 正文标记变化时：本楼穿着变了，强制重画（不走 sig 比较）
+function refreshActiveWindow() {
+    if (!isWinOpen()) return;
+    renderBody();
+}
+
+// msg-tag.js 通过 fn.refreshActiveWindow() 通知刷新
+fn.refreshActiveWindow = refreshActiveWindow;
+
 // ── 魔法棒菜单按钮 ───────────────────────────────────────
 function findMenu() {
     var m = document.getElementById('extensionsMenu'); if (m) return m;
@@ -194,4 +214,4 @@ function injectActiveBtn() {
     menu.appendChild(btn);
 }
 
-export { toggleWindow, openWindow, closeWindow, injectActiveBtn, refreshIfOpen };
+export { toggleWindow, openWindow, closeWindow, injectActiveBtn, refreshIfOpen, refreshActiveWindow };

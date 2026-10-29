@@ -1,15 +1,16 @@
 // ── 穿搭管理器 · 正文穿搭标记 ──────────────────────────────
 // AI 正文里写 <Outfit-Manager-Custom>穿搭名称1/角色1+穿搭名称2/角色2</Outfit-Manager-Custom>
-// 插件把这段标记换成可点的穿搭卡片行；点卡片看大图。
+// 插件把这段标记从正文里抹掉，并记下"这一楼穿了哪几套"，
+// 然后在左下角「当前生效穿搭」浮窗里给对应的卡片打上「本楼穿着」标识。
 
 import { loadMeta, loadPartition, charNameById } from './db.js';
-import { SHARED_CHAR_KEY, getOutfitThumb, getOutfitImages, getOutfitTags, garmentItemText } from './data.js';
-import { esc } from './utils.js';
+import { SHARED_CHAR_KEY } from './data.js';
 import { fn } from './bridge.js';
 
 var MARK = 'Outfit-Manager-Custom';
-// 开标签与闭标签都容忍（个别模型会把闭合标签写成同名开标签）
-var TAG_RE = new RegExp('<' + MARK + '>([\\s\\S]*?)<\\/?' + MARK + '>', 'gi');
+// 开标签与闭标签都容忍（个别模型会把闭合标签写成同名开标签），也容忍标签里多出的空格
+var TAG_RE = new RegExp('<' + MARK + '\\s*>([\\s\\S]*?)<\\/?' + MARK + '\\s*>', 'gi');
+var MARK_LOWER = '<' + MARK.toLowerCase();
 
 // "穿搭名称1/角色1+穿搭名称2/角色2" → [{name, owner}]
 function parseEntries(raw) {
@@ -88,98 +89,95 @@ function resolveEntry(entry) {
     return null;
 }
 
-function chipTagText(o) {
-    var t = getOutfitTags(o);
-    var bits = [];
-    if (t.garment && t.garment.length) bits.push(t.garment.slice(0, 3).map(function (g) { return garmentItemText(g, ' '); }).join('、'));
-    if (!bits.length && o.sceneTag) bits.push(o.sceneTag);
-    return bits.join(' ｜ ');
+// ── 本楼穿着记录 ─────────────────────────────────────────
+// outfitId → { owner, name }
+var _worn = {};
+var _wornMesId = null;
+
+function getWorn() { return _worn; }
+
+function resetWorn() {
+    _worn = {};
+    _wornMesId = null;
 }
 
-function buildChip(entry) {
-    var hit = resolveEntry(entry);
-    var el = document.createElement('span');
-    if (!hit) {
-        el.className = 'om-msgchip om-msgchip-miss';
-        el.title = '没有找到这套穿搭';
-        el.textContent = (entry.owner ? entry.owner + ' · ' : '') + entry.name + '（未找到）';
-        return el;
-    }
-    var o = hit.outfit;
-    var imgs = getOutfitImages(o);
-    var thumb = getOutfitThumb(o) || imgs[0] || '';
-    el.className = 'om-msgchip';
-    el.title = (hit.owner !== '通用' ? hit.owner + ' · ' : '') + (o.name || '');
-    el.innerHTML =
-        '<span class="om-msgchip-thumb">' +
-            (thumb ? '<img src="' + esc(thumb) + '" alt="" loading="lazy" />' : '<i class="fa-solid fa-shirt"></i>') +
-        '</span>' +
-        '<span class="om-msgchip-text">' +
-            (hit.owner && hit.owner !== '通用' ? '<span class="om-msgchip-owner">' + esc(hit.owner) + '</span>' : '') +
-            '<span class="om-msgchip-name">' + esc(o.name || '未命名穿搭') + '</span>' +
-            (chipTagText(o) ? '<span class="om-msgchip-tags">' + esc(chipTagText(o)) + '</span>' : '') +
-        '</span>';
-    el.addEventListener('click', function () {
-        if (fn.openLightbox) fn.openLightbox([o], o.id);
-    });
-    return el;
+function mesIdOf(el) {
+    var v = el && el.getAttribute ? el.getAttribute('mesid') : null;
+    var id = parseInt(v, 10);
+    return isNaN(id) ? -1 : id;
 }
 
-function buildChipRow(entries) {
-    var box = document.createElement('div');
-    box.className = 'om-msgtag';
-    box.setAttribute('contenteditable', 'false');
-    var head = document.createElement('span');
-    head.className = 'om-msgtag-head';
-    head.innerHTML = '<i class="fa-solid fa-shirt"></i> 本楼穿搭';
-    box.appendChild(head);
-    entries.forEach(function (e) { box.appendChild(buildChip(e)); });
-    return box;
-}
-
-// 只处理文本节点，避免破坏消息里的 HTML
-function replaceInTextNodes(root) {
+// 从正文里抹掉标记文本，并把命中的穿搭收集到 collected
+function stripInTextNodes(root, collected) {
     var walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
     var targets = [];
     var n;
     while ((n = walker.nextNode())) {
-        if (n.nodeValue && n.nodeValue.indexOf('<' + MARK) !== -1) {
+        if (n.nodeValue && n.nodeValue.toLowerCase().indexOf(MARK_LOWER) !== -1) {
             var p = n.parentNode;
             if (p && p.closest && (p.closest('pre') || p.closest('code'))) continue;
             targets.push(n);
         }
     }
+    var found = false;
     targets.forEach(function (node) {
         var text = node.nodeValue;
         var frag = document.createDocumentFragment();
         var last = 0, m;
         TAG_RE.lastIndex = 0;
         while ((m = TAG_RE.exec(text))) {
+            found = true;
             if (m.index > last) frag.appendChild(document.createTextNode(text.slice(last, m.index)));
-            var entries = parseEntries(m[1]);
-            if (entries.length) frag.appendChild(buildChipRow(entries));
+            parseEntries(m[1]).forEach(function (entry) {
+                var hit = resolveEntry(entry);
+                if (hit) collected.push(hit);
+            });
             last = m.index + m[0].length;
         }
         if (last < text.length) frag.appendChild(document.createTextNode(text.slice(last)));
         if (node.parentNode) node.parentNode.replaceChild(frag, node);
     });
+    return found;
 }
 
 function decorateMessage(el) {
-    if (!el || el.nodeType !== 1) return;
-    var mesText = el.querySelector('.mes_text');
-    if (!mesText) return;
-    // 已经换成卡片后，正文里就不再有原始标记 → 天然幂等
-    if (!mesText.textContent || mesText.textContent.indexOf('<' + MARK) === -1) return;
-    var len = String(mesText.textContent.length);
-    if (mesText.getAttribute('data-om-len') === len) return;
-    replaceInTextNodes(mesText);
+    if (!el || el.nodeType !== 1) return false;
+    // 优先只看正文区；找不到就用整条消息兜底
+    var mesText = el.querySelector('.mes_text') || el;
+    var raw = mesText.textContent || '';
+    if (raw.toLowerCase().indexOf(MARK_LOWER) === -1) return false;
+    var collected = [];
+    stripInTextNodes(mesText, collected);
+    // 抹掉后正文里不再有标记 → 天然幂等
     mesText.setAttribute('data-om-len', String(mesText.textContent.length));
+    if (!collected.length) return false;
+    var id = mesIdOf(el);
+    // 老楼层的标记不覆盖新楼层
+    if (_wornMesId !== null && id !== -1 && id < _wornMesId) return false;
+    _wornMesId = id;
+    _worn = {};
+    collected.forEach(function (hit) {
+        _worn[hit.outfit.id] = { owner: hit.owner, name: hit.outfit.name || '' };
+    });
+    return true;
 }
 
 function decorateAll() {
     var nodes = document.querySelectorAll('#chat .mes');
-    for (var i = 0; i < nodes.length; i++) decorateMessage(nodes[i]);
+    if (!nodes.length) nodes = document.querySelectorAll('#chat');
+    var changed = false;
+    for (var i = 0; i < nodes.length; i++) {
+        if (decorateMessage(nodes[i])) changed = true;
+    }
+    // 最新一楼没有标记 → 上一楼的"本楼穿着"作废
+    if (nodes.length) {
+        var lastId = mesIdOf(nodes[nodes.length - 1]);
+        if (lastId !== -1 && _wornMesId !== null && lastId > _wornMesId) {
+            resetWorn();
+            changed = true;
+        }
+    }
+    if (changed && fn.refreshActiveWindow) fn.refreshActiveWindow();
 }
 
 var _debounce = null;
@@ -198,7 +196,10 @@ export function setupMessageTags() {
                 if (!es || typeof es.on !== 'function' || !et) return;
                 if (et.MESSAGE_RENDERED) es.on(et.MESSAGE_RENDERED, function () { scheduleDecorate(); });
                 if (et.CHARACTER_MESSAGE_RENDERED) es.on(et.CHARACTER_MESSAGE_RENDERED, function () { scheduleDecorate(); });
-                if (et.CHAT_CHANGED) es.on(et.CHAT_CHANGED, function () { setTimeout(decorateAll, 200); });
+                if (et.CHAT_CHANGED) es.on(et.CHAT_CHANGED, function () {
+                    resetWorn();
+                    setTimeout(decorateAll, 200);
+                });
             });
         } catch (e) { /* 非酒馆环境忽略 */ }
         var chat = document.getElementById('chat');
@@ -211,4 +212,4 @@ export function setupMessageTags() {
     else start();
 }
 
-export { decorateAll, parseEntries };
+export { decorateAll, parseEntries, getWorn, resetWorn };
