@@ -85,7 +85,7 @@ async function run() {
             }, { context });
         }
         if (specifier === './data.js') {
-            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags'], function () {
+            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags', 'garmentItemText'], function () {
                 this.setExport('SHARED_CHAR_KEY', '__shared__');
                 this.setExport('partGetById', (part, id) => (part.outfits || []).find((o) => o.id === id) || null);
                 this.setExport('getActiveKit', () => null);
@@ -97,6 +97,7 @@ async function run() {
                     const pick = (v) => (Array.isArray(v) ? v.slice() : []);
                     return { scene: pick(src.scene), garment: pick(src.garment), impression: pick(src.impression) };
                 });
+                this.setExport('garmentItemText', (g) => (!g || !g.base) ? '' : (g.subs && g.subs.length ? g.base + '（' + g.subs.join('、') + '）' : g.base));
             }, { context });
         }
         if (specifier === './utils.js') {

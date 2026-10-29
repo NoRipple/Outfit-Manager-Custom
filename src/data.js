@@ -10,27 +10,31 @@ export var SHARED_CHAR_LABEL = '通用衣柜';
 // ══════════════════════════════════════════════════════════
 
 // ── 描述生成 Prompt 默认值 ──
-// 新版要求 AI 同时产出三组标签；旧版存量的默认 prompt 会被自动升级。
-export var VISION_PROMPT_DEFAULT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字","tags":{"scene":["场景"],"garment":["单品"],"impression":["气质"]}}';
+// 新版要求 AI 同时产出三组标签（服装组为两级：单品 + 二级词）；旧版默认 prompt 会被自动升级。
+export var VISION_PROMPT_DEFAULT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字","tags":{"scene":["场景"],"garment":[{"base":"单品","subs":["颜色/材质/款式"]}],"impression":["气质"]}}';
 export var LEGACY_VISION_PROMPT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字"}';
+// 上一版（扁平 garment）默认 prompt，也自动升级成两级
+export var PREV_VISION_PROMPT_FLAT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字","tags":{"scene":["场景"],"garment":["单品"],"impression":["气质"]}}';
 
 // ── 标签分析 Prompt 默认值（独立接口，只产出 tags）──
 // 用户可自行修改：往三个大类里塞什么词、怎么塞，都由这个提示词规定。
 export var TAG_PROMPT_DEFAULT = [
     '你在给一套服装穿搭打标签。用户会给出穿搭名称、描述（可能还有图片、分类和已有标签）。',
     '只输出 JSON，不要代码块，不要解释，格式：',
-    '{"tags":{"scene":[],"garment":[],"impression":[]}}',
+    '{"tags":{"scene":[],"garment":[{"base":"单品","subs":["颜色/材质/款式"]}],"impression":[]}}',
     '三组的含义：',
     '- scene：场景/时机，例如 通勤、约会、雨天、居家、睡前、运动、宴会',
-    '- garment：主要单品，例如 衬衫、百褶裙、风衣、高跟鞋、针织衫',
+    '- garment：主要单品。每个单品写成 {"base":"单品名","subs":["二级词"]}，二级词是这个单品的颜色、材质、款式等特征（如 驼色、针织、宽松）；没有二级词就给空数组',
     '- impression：气质观感，例如 清纯、干练、性感、慵懒、甜美、帅气',
-    '每组 1-4 个词，每个词 2-6 个汉字，只写词不写整句；某一组确实判断不出来就给空数组。'
+    '每个词 2-6 个汉字，只写词不写整句；某一组确实判断不出来就给空数组。'
 ].join('\n');
 
 // 旧默认 prompt 自动升级（用户自定义过的 prompt 不动）
 export function upgradeLegacyVisionPrompt(apiVision) {
     if (!apiVision || typeof apiVision !== 'object') return apiVision;
-    if (apiVision.prompt === LEGACY_VISION_PROMPT) apiVision.prompt = VISION_PROMPT_DEFAULT;
+    if (apiVision.prompt === LEGACY_VISION_PROMPT || apiVision.prompt === PREV_VISION_PROMPT_FLAT) {
+        apiVision.prompt = VISION_PROMPT_DEFAULT;
+    }
     return apiVision;
 }
 
@@ -59,6 +63,7 @@ export function defMeta() {
         fabSize: 38,
         fabPos: null,
         tagOrder: [],
+        tagTree: { garment: {} },   // 二级标签字典：{ garment: { 单品: [二级词...] } }
 
         // 注入配置
         mode: 'text',
@@ -113,6 +118,7 @@ export function ensureMetaDefaults(m) {
     if (!m.charGroups || typeof m.charGroups !== 'object') m.charGroups = {};
     if (!m.activePartitions || typeof m.activePartitions !== 'object') m.activePartitions = {};
     if (!Array.isArray(m.tagOrder)) m.tagOrder = [];
+    ensureTagTree(m);
     if (!m.apiVision) m.apiVision = defMeta().apiVision;
     else {
         var dv = defMeta().apiVision;
@@ -290,16 +296,20 @@ export function getOutfitImageCount(o) {
 
 // ══════════════════════════════════════════════════════════
 //  多维标签（scene 场景 / garment 服装 / impression 气质）
-//  三组全部多选、自由文本；不做字典、不做细分类。
+//  scene / impression：自由文本多选
+//  garment：两级 —— 每个单品 { base, subs }，subs 是颜色/材质/款式等二级词
 // ══════════════════════════════════════════════════════════
 
 export var TAG_GROUPS = [
     { key: 'scene', label: '场景', hint: '什么时候穿：通勤 / 约会 / 雨天 / 睡前' },
-    { key: 'garment', label: '服装', hint: '穿了什么：衬衫 / 百褶裙 / 风衣 / 高跟鞋' },
+    { key: 'garment', label: '服装', hint: '先加单品（高领衫），再给它加二级词（驼色 / 针织）' },
     { key: 'impression', label: '气质', hint: '什么感觉：清纯 / 干练 / 性感 / 慵懒' }
 ];
 
 export var TAG_GROUP_KEYS = ['scene', 'garment', 'impression'];
+
+var TAG_ITEM_LIMIT = 40;      // 单组标签/单品条数上限
+var GARMENT_SUB_LIMIT = 12;   // 单个单品的二级词上限
 
 export function emptyTags() {
     return { scene: [], garment: [], impression: [] };
@@ -320,13 +330,82 @@ export function normalizeTagList(list) {
     return out;
 }
 
+// ── 服装二级标签 ──────────────────────────────────────────
+// 单个单品：{ base: '高领衫', subs: ['驼色', '针织'] }
+// 兼容旧格式：字符串 → { base, subs: [] }；对象也可读 name/children
+export function normalizeGarmentItem(raw) {
+    if (raw === null || raw === undefined) return null;
+    if (typeof raw === 'string') {
+        var one = normalizeTagList([raw]);
+        return one.length ? { base: one[0], subs: [] } : null;
+    }
+    if (typeof raw !== 'object') return null;
+    var base = '';
+    if (typeof raw.base === 'string') base = normalizeTagList([raw.base])[0] || '';
+    if (!base && typeof raw.name === 'string') base = normalizeTagList([raw.name])[0] || '';
+    if (!base) return null;
+    var subs = [];
+    var rawSubs = Array.isArray(raw.subs) ? raw.subs : (Array.isArray(raw.children) ? raw.children : []);
+    rawSubs.forEach(function (s) {
+        var v = (s && typeof s === 'object') ? (s.value || s.name || s.zh || '') : s;
+        var one2 = normalizeTagList([v]);
+        if (one2.length && subs.indexOf(one2[0]) === -1) subs.push(one2[0]);
+    });
+    if (subs.length > GARMENT_SUB_LIMIT) subs = subs.slice(0, GARMENT_SUB_LIMIT);
+    return { base: base, subs: subs };
+}
+
+export function normalizeGarmentList(list) {
+    var out = [];
+    if (!Array.isArray(list)) return out;
+    list.forEach(function (raw) {
+        var it = normalizeGarmentItem(raw);
+        if (!it) return;
+        var exist = null;
+        for (var i = 0; i < out.length; i++) { if (out[i].base === it.base) { exist = out[i]; break; } }
+        if (!exist) {
+            if (out.length < TAG_ITEM_LIMIT) out.push(it);
+            return;
+        }
+        it.subs.forEach(function (s) {
+            if (exist.subs.indexOf(s) === -1 && exist.subs.length < GARMENT_SUB_LIMIT) exist.subs.push(s);
+        });
+    });
+    return out;
+}
+
+// 显示文本：高领衫（驼色、针织）
+export function garmentItemText(g, subSep) {
+    if (!g || !g.base) return '';
+    if (!g.subs || !g.subs.length) return g.base;
+    return g.base + '（' + g.subs.join(subSep || '、') + '）';
+}
+
+// 自然文字（搜索/注入）：驼色针织高领衫
+export function garmentPlainText(g) {
+    if (!g || !g.base) return '';
+    return (g.subs && g.subs.length ? g.subs.join('') : '') + g.base;
+}
+
+// 扁平化 garment 组为字符串（搜索、建议收集用）
+export function flattenGarmentTags(tags) {
+    var out = [];
+    var list = (tags && Array.isArray(tags.garment)) ? tags.garment : [];
+    list.forEach(function (g) {
+        if (!g || !g.base) return;
+        if (out.indexOf(g.base) === -1) out.push(g.base);
+        (g.subs || []).forEach(function (s) { if (out.indexOf(s) === -1) out.push(s); });
+    });
+    return out;
+}
+
 // 任意来源（AI 返回 / 旧数据 / 备份）→ 合法 tags 对象
 export function normalizeTags(raw) {
     var tags = emptyTags();
     if (!raw || typeof raw !== 'object') return tags;
-    TAG_GROUP_KEYS.forEach(function (k) {
-        tags[k] = normalizeTagList(raw[k]);
-    });
+    tags.scene = normalizeTagList(raw.scene);
+    tags.garment = normalizeGarmentList(raw.garment);
+    tags.impression = normalizeTagList(raw.impression);
     return tags;
 }
 
@@ -364,15 +443,43 @@ export function addOutfitTag(o, group, tag) {
     var tags = getOutfitTags(o);
     if (TAG_GROUP_KEYS.indexOf(group) === -1) return tags;
     var one = normalizeTagList([tag]);
-    if (one.length && tags[group].indexOf(one[0]) === -1) tags[group].push(one[0]);
+    if (!one.length) return tags;
+    if (group === 'garment') {
+        var exist = null;
+        for (var i = 0; i < tags.garment.length; i++) { if (tags.garment[i].base === one[0]) { exist = tags.garment[i]; break; } }
+        if (!exist && tags.garment.length < TAG_ITEM_LIMIT) tags.garment.push({ base: one[0], subs: [] });
+    } else if (tags[group].indexOf(one[0]) === -1) {
+        tags[group].push(one[0]);
+    }
+    return setOutfitTags(o, tags);
+}
+
+// 给某个单品追加二级词（单品不存在则连同一起创建）
+export function addOutfitGarmentSub(o, base, sub) {
+    var tags = getOutfitTags(o);
+    var b = normalizeTagList([base])[0] || '';
+    var s = normalizeTagList([sub])[0] || '';
+    if (!b || !s) return tags;
+    var item = null;
+    for (var i = 0; i < tags.garment.length; i++) { if (tags.garment[i].base === b) { item = tags.garment[i]; break; } }
+    if (!item) {
+        if (tags.garment.length >= TAG_ITEM_LIMIT) return tags;
+        item = { base: b, subs: [] };
+        tags.garment.push(item);
+    }
+    if (item.subs.indexOf(s) === -1 && item.subs.length < GARMENT_SUB_LIMIT) item.subs.push(s);
     return setOutfitTags(o, tags);
 }
 
 export function removeOutfitTag(o, group, tag) {
     var tags = getOutfitTags(o);
     if (TAG_GROUP_KEYS.indexOf(group) === -1) return tags;
-    var idx = tags[group].indexOf(tag);
-    if (idx !== -1) tags[group].splice(idx, 1);
+    if (group === 'garment') {
+        tags.garment = tags.garment.filter(function (g) { return g.base !== tag; });
+    } else {
+        var idx = tags[group].indexOf(tag);
+        if (idx !== -1) tags[group].splice(idx, 1);
+    }
     return setOutfitTags(o, tags);
 }
 
@@ -388,27 +495,74 @@ export function outfitHasTags(o) {
 export function outfitTagText(o, sep) {
     var tags = normalizeTags(o && o.tags);
     var all = [];
-    TAG_GROUP_KEYS.forEach(function (k) {
-        tags[k].forEach(function (t) { all.push(t); });
-    });
+    tags.scene.forEach(function (t) { all.push(t); });
+    flattenGarmentTags(tags).forEach(function (t) { all.push(t); });
+    tags.impression.forEach(function (t) { all.push(t); });
     return all.join(sep || ' ');
 }
 
-// 从一组 partition 里按组收集已有标签（做输入建议）
+// 从一组 partition 里按组收集已有标签（做输入建议）；garment 收集到的是单品名
 export function collectTagsByGroup(partitions) {
     var result = emptyTags();
     (partitions || []).forEach(function (p) {
         if (!p || !Array.isArray(p.outfits)) return;
         p.outfits.forEach(function (o) {
             var tags = normalizeTags(o && o.tags);
-            TAG_GROUP_KEYS.forEach(function (k) {
-                tags[k].forEach(function (t) {
-                    if (result[k].indexOf(t) === -1) result[k].push(t);
-                });
-            });
+            tags.scene.forEach(function (t) { if (result.scene.indexOf(t) === -1) result.scene.push(t); });
+            tags.impression.forEach(function (t) { if (result.impression.indexOf(t) === -1) result.impression.push(t); });
+            tags.garment.forEach(function (g) { if (result.garment.indexOf(g.base) === -1) result.garment.push(g.base); });
         });
     });
     return result;
+}
+
+// 服装建议：所有单品名 + 每个单品的二级词（合并 meta.tagTree 字典与穿搭里用过的）
+export function collectGarmentSuggestions(partitions, tagTree) {
+    var bases = [];
+    var subsByBase = {};
+    function note(base, sub) {
+        if (!base) return;
+        if (bases.indexOf(base) === -1) bases.push(base);
+        if (!subsByBase[base]) subsByBase[base] = [];
+        if (sub && subsByBase[base].indexOf(sub) === -1) subsByBase[base].push(sub);
+    }
+    if (tagTree && tagTree.garment && typeof tagTree.garment === 'object') {
+        Object.keys(tagTree.garment).forEach(function (b) {
+            note(b, '');
+            var arr = tagTree.garment[b];
+            if (Array.isArray(arr)) arr.forEach(function (s) { note(b, s); });
+        });
+    }
+    (partitions || []).forEach(function (p) {
+        if (!p || !Array.isArray(p.outfits)) return;
+        p.outfits.forEach(function (o) {
+            normalizeTags(o && o.tags).garment.forEach(function (g) {
+                note(g.base, '');
+                (g.subs || []).forEach(function (s) { note(g.base, s); });
+            });
+        });
+    });
+    return { bases: bases, subsByBase: subsByBase };
+}
+
+// ── 二级标签字典（meta.tagTree）：{ garment: { 高领衫: ['驼色','针织'] } } ──
+// 不是预置词表，而是从用户/图片/AI 的用法里自动长出来的关系表。
+export function ensureTagTree(meta) {
+    if (!meta.tagTree || typeof meta.tagTree !== 'object') meta.tagTree = { garment: {} };
+    if (!meta.tagTree.garment || typeof meta.tagTree.garment !== 'object') meta.tagTree.garment = {};
+    return meta.tagTree;
+}
+
+// 把一套穿搭里的 garment 关系记进字典（自动增长，不覆盖已有词）
+export function noteTagTreeUsage(meta, tags) {
+    if (!meta) return;
+    var tree = ensureTagTree(meta);
+    normalizeTags(tags).garment.forEach(function (g) {
+        if (!Array.isArray(tree.garment[g.base])) tree.garment[g.base] = [];
+        (g.subs || []).forEach(function (s) {
+            if (tree.garment[g.base].indexOf(s) === -1 && tree.garment[g.base].length < 60) tree.garment[g.base].push(s);
+        });
+    });
 }
 
 // 获取 outfit 当前激活的 kit，无则返回 null

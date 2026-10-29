@@ -2,17 +2,17 @@
 // Vision API、模型选择、批量描述生成
 
 import { load, save, loadMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, resolveImageForExternal } from './db.js';
-import { getById, partGetById, partGetAccById, normalizeTags, TAG_GROUP_KEYS, TAG_GROUPS, TAG_PROMPT_DEFAULT, setOutfitTags, outfitHasTags } from './data.js';
+import { getById, partGetById, partGetAccById, normalizeTags, TAG_GROUP_KEYS, TAG_GROUPS, TAG_PROMPT_DEFAULT, setOutfitTags, outfitHasTags, flattenGarmentTags, garmentItemText } from './data.js';
 import { toast, getPopupLayer, esc } from './utils.js';
 
 // ── 标签生成指令（追加在用户 prompt 之后，用户改 prompt 也不会丢）──
 var TAG_INSTRUCTION = [
     '',
-    '另外请在 JSON 里加一个 tags 字段，给这套穿搭打三组标签（每组 0-4 个词，每个词 2-6 个汉字，只写词不要整句，没有就给空数组）：',
+    '另外请在 JSON 里加一个 tags 字段，给这套穿搭打三组标签（每个词 2-6 个汉字，只写词不要整句，没有就给空数组）：',
     '- tags.scene：场景/时机，例如 通勤、约会、雨天、居家、睡前、运动、宴会',
-    '- tags.garment：主要单品，例如 衬衫、百褶裙、风衣、高跟鞋、针织衫',
+    '- tags.garment：主要单品，每个单品写成 {"base":"单品名","subs":["颜色/材质/款式等二级词"]}，例如 {"base":"高领衫","subs":["驼色","针织"]}；没有二级词就给空数组',
     '- tags.impression：气质观感，例如 清纯、干练、性感、慵懒、甜美、帅气',
-    'tags 结构示例：{"scene":["通勤"],"garment":["衬衫","百褶裙"],"impression":["干练"]}'
+    'tags 结构示例：{"scene":["通勤"],"garment":[{"base":"衬衫","subs":["白色"]},{"base":"百褶裙","subs":[]}],"impression":["干练"]}'
 ].join('\n');
 
 function withTagInstruction(prompt) {
@@ -33,12 +33,21 @@ function hasTagContent(tags) {
 // 把 AI 返回的标签写回 outfit：overwrite=true 整体覆盖，否则只补缺失的
 function applyParsedTags(o, parsedTags, overwrite) {
     if (!o || !hasTagContent(parsedTags)) return;
-    if (overwrite) { setOutfitTags(o, parsedTags); return; }
+    var incoming = normalizeTags(parsedTags);
+    if (overwrite) { setOutfitTags(o, incoming); return; }
     var cur = normalizeTags(o.tags);
     var changed = false;
-    TAG_GROUP_KEYS.forEach(function (k) {
-        (parsedTags[k] || []).forEach(function (t) {
+    ['scene', 'impression'].forEach(function (k) {
+        incoming[k].forEach(function (t) {
             if (cur[k].indexOf(t) === -1) { cur[k].push(t); changed = true; }
+        });
+    });
+    incoming.garment.forEach(function (g) {
+        var exist = null;
+        for (var i = 0; i < cur.garment.length; i++) if (cur.garment[i].base === g.base) { exist = cur.garment[i]; break; }
+        if (!exist) { cur.garment.push({ base: g.base, subs: g.subs.slice() }); changed = true; return; }
+        g.subs.forEach(function (s) {
+            if (exist.subs.indexOf(s) === -1) { exist.subs.push(s); changed = true; }
         });
     });
     if (changed) setOutfitTags(o, cur);
@@ -642,7 +651,11 @@ function buildTagContext(outfit) {
     if (cat) lines.push('分类：' + cat);
     if (outfit.description) lines.push('描述：' + outfit.description);
     var cur = normalizeTags(outfit.tags);
-    var curText = TAG_GROUP_KEYS.map(function (k) { return k + '：' + (cur[k].length ? cur[k].join('、') : '无'); }).join('；');
+    var curText = [
+        'scene：' + (cur.scene.length ? cur.scene.join('、') : '无'),
+        'garment：' + (cur.garment.length ? cur.garment.map(function (g) { return garmentItemText(g, '、'); }).join('、') : '无'),
+        'impression：' + (cur.impression.length ? cur.impression.join('、') : '无')
+    ].join('；');
     lines.push('已有标签（可参考，也可补充或纠正）：' + curText);
     return lines.join('\n');
 }

@@ -2,7 +2,7 @@
 // 批量标签、批量导入、批量AI生成、数据导出导入
 
 import { load, save, loadMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, currentUserPartKey, syncActivePartitions, charIdByName, isServerMode, batchResolveImages, uploadImage, getImageUrlPrefix } from './db.js';
-import { getCharData, getViewOutfits, getViewCategories, getById, getCatNames, getSubCats, partGetById, partGetAccById, cleanAccIdFromKits, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, getOutfitTags, setOutfitTags, addOutfitTag, emptyTags } from './data.js';
+import { getCharData, getViewOutfits, getViewCategories, getById, getCatNames, getSubCats, partGetById, partGetAccById, cleanAccIdFromKits, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, getOutfitTags, setOutfitTags, addOutfitTag, addOutfitGarmentSub, emptyTags, noteTagTreeUsage } from './data.js';
 import { genId, esc, toast, getPopupLayer, compressImage } from './utils.js';
 import { batchGenerateDescriptions, batchGenerateAccDescriptions, classifyOutfitImage } from './api.js';
 import { state, fn } from './bridge.js';
@@ -179,7 +179,8 @@ function openBatchTagPanel(selectedIds, onDone) {
     function groupTags(group) {
         var found = [];
         getViewOutfits(load()).forEach(function (o) {
-            getOutfitTags(o)[group].forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
+            var arr = group === 'garment' ? getOutfitTags(o).garment.map(function (g) { return g.base; }) : getOutfitTags(o)[group];
+            arr.forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
         });
         var order = load().tagOrder || [];
         return found.sort(function (a, b) {
@@ -194,7 +195,10 @@ function openBatchTagPanel(selectedIds, onDone) {
     function countTag(group, tag) {
         var n = 0;
         getViewOutfits(load()).forEach(function (o) {
-            if (getOutfitTags(o)[group].indexOf(tag) !== -1) n++;
+            var has = group === 'garment'
+                ? getOutfitTags(o).garment.some(function (g) { return g.base === tag; })
+                : getOutfitTags(o)[group].indexOf(tag) !== -1;
+            if (has) n++;
         });
         return n;
     }
@@ -202,7 +206,11 @@ function openBatchTagPanel(selectedIds, onDone) {
     function allSelectedHave(group, tag) {
         var list = selectedOutfits();
         if (!list.length) return false;
-        return list.every(function (o) { return getOutfitTags(o)[group].indexOf(tag) !== -1; });
+        return list.every(function (o) {
+            return group === 'garment'
+                ? getOutfitTags(o).garment.some(function (g) { return g.base === tag; })
+                : getOutfitTags(o)[group].indexOf(tag) !== -1;
+        });
     }
 
     var sheet = createSheet([
@@ -223,10 +231,16 @@ function openBatchTagPanel(selectedIds, onDone) {
     var searchInp = sheet.querySelector('#om-btag-search');
     var tabsEl = sheet.querySelector('#om-btag-tabs');
 
+    var newInpEl = sheet.querySelector('#om-btag-new');
     function renderTabs() {
         tabsEl.querySelectorAll('.om-tagpanel-tab').forEach(function (b) {
             b.classList.toggle('active', b.dataset.g === activeGroup);
         });
+        if (newInpEl) {
+            newInpEl.placeholder = activeGroup === 'garment'
+                ? '输入单品（如 高领衫），或用 单品/二级词（如 高领衫/驼色）'
+                : '输入新标签并添加…';
+        }
     }
 
     function renderList() {
@@ -253,11 +267,28 @@ function openBatchTagPanel(selectedIds, onDone) {
         if (!tag) { toast('请输入标签', true); return; }
         var curP = loadCurrent();
         var n = 0;
+        var base = tag, sub = '';
+        if (activeGroup === 'garment' && tag.indexOf('/') !== -1) {
+            var parts = tag.split('/');
+            base = (parts[0] || '').trim();
+            sub = (parts[1] || '').trim();
+        }
         (curP.outfits || []).forEach(function (o) {
             if (selectedIds.indexOf(o.id) === -1) return;
-            var before = getOutfitTags(o)[activeGroup].length;
-            addOutfitTag(o, activeGroup, tag);
-            if (getOutfitTags(o)[activeGroup].length > before) n++;
+            var before = getOutfitTags(o).garment.length;
+            var beforeSubs = 0;
+            if (sub) {
+                var it = null;
+                getOutfitTags(o).garment.forEach(function (g) { if (g.base === base) it = g; });
+                beforeSubs = it ? it.subs.length : 0;
+            }
+            if (sub) addOutfitGarmentSub(o, base, sub);
+            else addOutfitTag(o, activeGroup, base);
+            if (sub) {
+                var it2 = null;
+                getOutfitTags(o).garment.forEach(function (g) { if (g.base === base) it2 = g; });
+                if (it2 && it2.subs.length > beforeSubs) n++;
+            } else if (getOutfitTags(o).garment.length > before) n++;
         });
         saveCurrent(curP);
         renderList();

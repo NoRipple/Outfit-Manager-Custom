@@ -3,7 +3,7 @@
 // v2: 使用 loadMeta() + loadActivePartitions() 代替旧 load() 全量读取
 
 import { loadMeta, loadActivePartitions, currentUserPartKey, charNameById } from './db.js';
-import { SHARED_CHAR_KEY, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags } from './data.js';
+import { SHARED_CHAR_KEY, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags, garmentItemText } from './data.js';
 import { toast } from './utils.js';
 import { state } from './bridge.js';
 
@@ -20,7 +20,7 @@ function buildTagLine(o) {
     var t = getOutfitTags(o);
     var parts = [];
     if (t.scene.length) parts.push('【场景：' + t.scene.join(' / ') + '】');
-    if (t.garment.length) parts.push('【服装：' + t.garment.join('、') + '】');
+    if (t.garment.length) parts.push('【服装：' + t.garment.map(function (g) { return garmentItemText(g, '、'); }).join('、') + '】');
     if (t.impression.length) parts.push('【气质：' + t.impression.join('、') + '】');
     if (!parts.length && o && o.sceneTag && o.sceneTag.trim()) parts.push('【场景：' + o.sceneTag.trim() + '】');
     return parts.join('');

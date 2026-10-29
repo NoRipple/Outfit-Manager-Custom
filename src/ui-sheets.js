@@ -2,7 +2,7 @@
 // 操作菜单、编辑面板、预设、设置、分类管理、Lightbox、导入导出、批量描述
 
 import { load, save, loadMeta, saveMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, syncActivePartitions, charNameById, isServerMode, uploadImage } from './db.js';
-import { def, getCharData, getViewOutfits, getViewCategories, getViewActiveIds, setViewActiveIds, getById, getViewById, isActive, getCatNames, getSubCats, findCatObj, hasSubCats, partGetById, partIsActive, partGetAccById, cleanAccIdFromKits, getActiveKit, getKitAccessories, ensureOutfitKits, getOutfitImages, getOutfitPrimaryImage, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, emptyTags, getOutfitTags, setOutfitTags, normalizeTagList, collectTagsByGroup } from './data.js';
+import { def, getCharData, getViewOutfits, getViewCategories, getViewActiveIds, setViewActiveIds, getById, getViewById, isActive, getCatNames, getSubCats, findCatObj, hasSubCats, partGetById, partIsActive, partGetAccById, cleanAccIdFromKits, getActiveKit, getKitAccessories, ensureOutfitKits, getOutfitImages, getOutfitPrimaryImage, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, emptyTags, getOutfitTags, setOutfitTags, normalizeTagList, normalizeTags, collectTagsByGroup, collectGarmentSuggestions, noteTagTreeUsage, ensureTagTree, garmentItemText, flattenGarmentTags, addOutfitGarmentSub } from './data.js';
 import { genId, esc, toast, getPopupLayer, compressImage } from './utils.js';
 import { generateSingleDescription, generateSingleAccDescription, generateSingleTags, batchGenerateDescriptions, openModelPicker, normalizeEndpoint } from './api.js';
 import { state, fn } from './bridge.js';
@@ -178,7 +178,11 @@ function openContextMenu(outfit, imgOutfits) {
             if (err) { toast('生成失败：' + err, true); return; }
             var curP = loadCurrent();
             var o = partGetById(curP, outfit.id);
-            if (o) { setOutfitTags(o, tags); saveCurrent(curP); }
+            if (o) {
+                setOutfitTags(o, tags);
+                var _m2 = loadMeta(); noteTagTreeUsage(_m2, tags); saveMeta(_m2);
+                saveCurrent(curP);
+            }
             toast('✅ 已生成标签：' + (o ? o.name : outfit.name));
             fn.renderGrid();
         });
@@ -199,13 +203,15 @@ function openContextMenu(outfit, imgOutfits) {
 }
 
 // ── 编辑 Bottom Sheet ─────────────────────────────────────
-// 收集标签建议（按组）；不传 group 时默认 scene，保持旧调用兼容
+// 收集标签建议（按组，返回字符串数组）；garment 组返回「单品名」列表
 function getAllTagSuggestions(d, group) {
     var g = TAG_GROUP_KEYS.indexOf(group) !== -1 ? group : 'scene';
     var found = [];
     getAllOutfitLists(d).forEach(function (list) {
         list.forEach(function (o) {
-            getOutfitTags(o)[g].forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
+            var tags = getOutfitTags(o);
+            var arr = g === 'garment' ? tags.garment.map(function (it) { return it.base; }) : tags[g];
+            (arr || []).forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
         });
     });
     // 按 tagOrder 排序：先按记忆顺序排，新标签追加到末尾
@@ -242,19 +248,24 @@ function openTagPanel(initialGroup) {
     var tabsEl = sheet.querySelector('#om-tag-tabs');
     var dragFrom = null;
 
-    function groupTags(group) {
-        var found = [];
-        allOutfits.forEach(function (o) {
-            getOutfitTags(o)[group].forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
-        });
+    function sortByOrder(found) {
         var order = (d && d.tagOrder) || [];
-        return found.sort(function (a, b) {
+        found.sort(function (a, b) {
             var ia = order.indexOf(a), ib = order.indexOf(b);
             if (ia === -1 && ib === -1) return 0;
             if (ia === -1) return 1;
             if (ib === -1) return -1;
             return ia - ib;
         });
+        return found;
+    }
+
+    function tagList(group) {
+        var found = [];
+        allOutfits.forEach(function (o) {
+            getOutfitTags(o)[group].forEach(function (t) { if (found.indexOf(t) === -1) found.push(t); });
+        });
+        return sortByOrder(found);
     }
 
     function countTag(group, tag) {
@@ -263,6 +274,29 @@ function openTagPanel(initialGroup) {
             if (getOutfitTags(o)[group].indexOf(tag) !== -1) n++;
         });
         return n;
+    }
+
+    // ── 服装组：单品 + 二级词 ──
+    function garmentEntries() {
+        var bases = [];
+        allOutfits.forEach(function (o) {
+            getOutfitTags(o).garment.forEach(function (g) { if (bases.indexOf(g.base) === -1) bases.push(g.base); });
+        });
+        sortByOrder(bases);
+        return bases.map(function (b) {
+            var baseCount = 0, subCounts = {};
+            allOutfits.forEach(function (o) {
+                getOutfitTags(o).garment.forEach(function (g) {
+                    if (g.base !== b) return;
+                    baseCount++;
+                    (g.subs || []).forEach(function (s) { subCounts[s] = (subCounts[s] || 0) + 1; });
+                });
+            });
+            return {
+                base: b, count: baseCount,
+                subs: Object.keys(subCounts).map(function (s) { return { name: s, count: subCounts[s] }; })
+            };
+        });
     }
 
     function renderTabs() {
@@ -288,6 +322,24 @@ function openTagPanel(initialGroup) {
         d.tagOrder = order;
     }
 
+    // 从字典里摘掉一个词
+    function treeRemove(group, base, sub) {
+        var m = loadMeta();
+        var tree = ensureTagTree(m);
+        if (group === 'garment' && base) {
+            if (sub) {
+                var arr = tree.garment[base];
+                if (Array.isArray(arr)) {
+                    var i = arr.indexOf(sub);
+                    if (i !== -1) arr.splice(i, 1);
+                }
+            } else if (tree.garment[base]) {
+                delete tree.garment[base];
+            }
+            saveMeta(m);
+        }
+    }
+
     function delTag(tag) {
         if (!window.confirm('从所有穿搭里删除标签「' + tag + '」？\n穿搭本身不会被删除。')) return;
         var dd = load();
@@ -303,10 +355,54 @@ function openTagPanel(initialGroup) {
         if (dd.chars) { for (var cn in dd.chars) ((dd.chars[cn] || {}).outfits || []).forEach(strip); }
         if (dd.tagOrder) { var oi = dd.tagOrder.indexOf(tag); if (oi !== -1) dd.tagOrder.splice(oi, 1); }
         save(dd);
+        treeRemove(g, g === 'garment' ? tag : null, null);
         d = dd;
         reloadOutfits(dd);
         renderList();
         toast('已删除标签「' + tag + '」');
+    }
+
+    function delBase(base) {
+        if (!window.confirm('从所有穿搭里删除单品「' + base + '」（连同它的二级词）？')) return;
+        var dd = load();
+        function strip(o) {
+            var t = getOutfitTags(o);
+            var before = t.garment.length;
+            t.garment = t.garment.filter(function (g) { return g.base !== base; });
+            if (t.garment.length !== before) setOutfitTags(o, t);
+        }
+        (dd.outfits || []).forEach(strip);
+        if (dd.chars) { for (var cn in dd.chars) ((dd.chars[cn] || {}).outfits || []).forEach(strip); }
+        if (dd.tagOrder) { var oi = dd.tagOrder.indexOf(base); if (oi !== -1) dd.tagOrder.splice(oi, 1); }
+        save(dd);
+        treeRemove('garment', base, null);
+        d = dd;
+        reloadOutfits(dd);
+        renderList();
+        toast('已删除单品「' + base + '」');
+    }
+
+    function delSub(base, sub) {
+        if (!window.confirm('从所有穿搭里删除二级词「' + sub + '」（' + base + ' 的）？')) return;
+        var dd = load();
+        function strip(o) {
+            var t = getOutfitTags(o);
+            var changed = false;
+            t.garment.forEach(function (g) {
+                if (g.base !== base) return;
+                var i = g.subs.indexOf(sub);
+                if (i !== -1) { g.subs.splice(i, 1); changed = true; }
+            });
+            if (changed) setOutfitTags(o, t);
+        }
+        (dd.outfits || []).forEach(strip);
+        if (dd.chars) { for (var cn in dd.chars) ((dd.chars[cn] || {}).outfits || []).forEach(strip); }
+        save(dd);
+        treeRemove('garment', base, sub);
+        d = dd;
+        reloadOutfits(dd);
+        renderList();
+        toast('已删除二级词「' + sub + '」');
     }
 
     function bindDrag(fullTags) {
@@ -344,15 +440,61 @@ function openTagPanel(initialGroup) {
         });
     }
 
+    function bindListEvents() {
+        listEl.querySelectorAll('.om-tagpanel-del').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                if (btn.dataset.base) { delBase(btn.dataset.base); return; }
+                var item = btn.closest('.om-tagpanel-item');
+                if (item) delTag(item.dataset.tag);
+            });
+        });
+        listEl.querySelectorAll('.om-tagpanel-subdel').forEach(function (btn) {
+            btn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                delSub(btn.dataset.base, btn.dataset.sub);
+            });
+        });
+    }
+
     function renderList() {
-        var tags = groupTags(activeGroup);
         var q = (searchInp.value || '').trim().toLowerCase();
-        var shown = q ? tags.filter(function (t) { return t.toLowerCase().indexOf(q) !== -1; }) : tags;
-        if (!shown.length) {
+        if (activeGroup === 'garment') {
+            var entries = garmentEntries();
+            var shown = q ? entries.filter(function (en) {
+                if (en.base.toLowerCase().indexOf(q) !== -1) return true;
+                return en.subs.some(function (s) { return s.name.toLowerCase().indexOf(q) !== -1; });
+            }) : entries;
+            if (!shown.length) {
+                listEl.innerHTML = '<div class="om-tagpanel-empty">' + (q ? '没有匹配的标签' : '这个分组还没有标签') + '</div>';
+                return;
+            }
+            listEl.innerHTML = shown.map(function (en) {
+                var subsHtml = en.subs.map(function (s) {
+                    return '<span class="om-tagpanel-sub" data-base="' + esc(en.base) + '" data-sub="' + esc(s.name) + '">' +
+                        esc(s.name) + '<b>' + s.count + '</b>' +
+                        '<button type="button" class="om-tagpanel-subdel" data-base="' + esc(en.base) + '" data-sub="' + esc(s.name) + '" title="删除这个二级词"><i class="fa-solid fa-xmark"></i></button>' +
+                        '</span>';
+                }).join('');
+                return '<div class="om-tagpanel-item om-tagpanel-garment" data-base="' + esc(en.base) + '">' +
+                    '<div class="om-tagpanel-garm-head">' +
+                    '<span class="om-tagpanel-name">' + esc(en.base) + '</span>' +
+                    '<span class="om-tagpanel-count">' + en.count + '</span>' +
+                    '<button type="button" class="om-tagpanel-del" data-base="' + esc(en.base) + '" title="从所有穿搭中删除此单品"><i class="fa-solid fa-trash"></i></button>' +
+                    '</div>' +
+                    (subsHtml ? '<div class="om-tagpanel-subs">' + subsHtml + '</div>' : '') +
+                    '</div>';
+            }).join('');
+            bindListEvents();
+            return;
+        }
+        var tags = tagList(activeGroup);
+        var shownTags = q ? tags.filter(function (t) { return t.toLowerCase().indexOf(q) !== -1; }) : tags;
+        if (!shownTags.length) {
             listEl.innerHTML = '<div class="om-tagpanel-empty">' + (q ? '没有匹配的标签' : '这个分组还没有标签') + '</div>';
             return;
         }
-        listEl.innerHTML = shown.map(function (tag) {
+        listEl.innerHTML = shownTags.map(function (tag) {
             return '<div class="om-tagpanel-item" data-tag="' + esc(tag) + '" draggable="' + (q ? 'false' : 'true') + '">' +
                 '<i class="fa-solid fa-grip-vertical om-tagpanel-grip"></i>' +
                 '<span class="om-tagpanel-name">' + esc(tag) + '</span>' +
@@ -361,13 +503,7 @@ function openTagPanel(initialGroup) {
                 '</div>';
         }).join('');
         if (!q) bindDrag(tags);
-        listEl.querySelectorAll('.om-tagpanel-del').forEach(function (btn) {
-            btn.addEventListener('click', function (e) {
-                e.stopPropagation();
-                var item = btn.closest('.om-tagpanel-item');
-                if (item) delTag(item.dataset.tag);
-            });
-        });
+        bindListEvents();
     }
 
     tabsEl.querySelectorAll('.om-tagpanel-tab').forEach(function (b) {
@@ -469,11 +605,19 @@ function buildShowcaseHtml(outfit, part) {
 // ── 三组标签编辑器（编辑面板内联）────────────────────────
 function buildTagEditorHtml() {
     return TAG_GROUPS.map(function (g) {
+        var body;
+        if (g.key === 'garment') {
+            body = '<div class="om-garm-list" data-g="garment"></div>' +
+                '<div class="om-tagg-add"><input type="text" class="om-tagg-input" data-g="garment" placeholder="输入单品后回车（如 高领衫）" autocomplete="off" /><button type="button" class="om-tagg-addbtn" data-g="garment" title="添加单品"><i class="fa-solid fa-plus"></i></button></div>' +
+                '<div class="om-tagg-sug" data-g="garment"></div>';
+        } else {
+            body = '<div class="om-tagg-chips" data-g="' + g.key + '"></div>' +
+                '<div class="om-tagg-add"><input type="text" class="om-tagg-input" data-g="' + g.key + '" placeholder="输入标签后回车" autocomplete="off" /><button type="button" class="om-tagg-addbtn" data-g="' + g.key + '" title="添加"><i class="fa-solid fa-plus"></i></button></div>' +
+                '<div class="om-tagg-sug" data-g="' + g.key + '"></div>';
+        }
         return '<div class="om-tagg" data-g="' + g.key + '">' +
             '<div class="om-tagg-head"><span class="om-tagg-label">' + esc(g.label) + '</span><span class="om-tagg-hint">' + esc(g.hint) + '</span></div>' +
-            '<div class="om-tagg-chips" data-g="' + g.key + '"></div>' +
-            '<div class="om-tagg-add"><input type="text" class="om-tagg-input" data-g="' + g.key + '" placeholder="输入标签后回车" autocomplete="off" /><button type="button" class="om-tagg-addbtn" data-g="' + g.key + '" title="添加"><i class="fa-solid fa-plus"></i></button></div>' +
-            '<div class="om-tagg-sug" data-g="' + g.key + '"></div>' +
+            body +
             '</div>';
     }).join('');
 }
@@ -487,14 +631,22 @@ function getAllOutfitLists(d) {
     return lists;
 }
 
-// 绑定标签编辑器，返回 { get() → 规范化 tags 对象 }
+// 绑定标签编辑器，返回 { get() → 规范化 tags 对象, set(raw) }
 function bindTagEditor(sheet, initialTags, suggestions) {
     var root = sheet.querySelector('#om-tageditor');
-    var values = emptyTags();
-    TAG_GROUP_KEYS.forEach(function (k) {
-        values[k] = normalizeTagList(initialTags && initialTags[k]);
-    });
+    var values = normalizeTags(initialTags);
 
+    // 服装建议：{ bases:[], subsByBase:{} }（也兼容旧的字符串数组）
+    var gSug = suggestions && suggestions.garment;
+    var gBases = Array.isArray(gSug) ? gSug.slice() : ((gSug && gSug.bases) || []).slice();
+    var gSubs = (gSug && gSug.subsByBase) || {};
+
+    function findItem(base) {
+        for (var i = 0; i < values.garment.length; i++) if (values.garment[i].base === base) return values.garment[i];
+        return null;
+    }
+
+    // ── 普通组（scene / impression）芯片与建议 ──
     function chipsHtml(g) {
         if (!values[g].length) return '<span class="om-tagg-none">未选择</span>';
         return values[g].map(function (t) {
@@ -502,7 +654,6 @@ function bindTagEditor(sheet, initialTags, suggestions) {
                 '<button type="button" class="om-tagg-del" data-g="' + g + '" data-tag="' + esc(t) + '"><i class="fa-solid fa-xmark"></i></button></span>';
         }).join('');
     }
-
     function sugHtml(g, filter) {
         var q = (filter || '').trim().toLowerCase();
         var list = ((suggestions && suggestions[g]) || []).filter(function (t) {
@@ -514,8 +665,8 @@ function bindTagEditor(sheet, initialTags, suggestions) {
             return '<button type="button" class="om-tagg-sugbtn" data-g="' + g + '" data-tag="' + esc(t) + '">' + esc(t) + '</button>';
         }).join('');
     }
-
     function refresh(g) {
+        if (g === 'garment') { refreshGarment(); return; }
         var chipsEl = sheet.querySelector('.om-tagg-chips[data-g="' + g + '"]');
         var sugEl = sheet.querySelector('.om-tagg-sug[data-g="' + g + '"]');
         var inp = sheet.querySelector('.om-tagg-input[data-g="' + g + '"]');
@@ -523,12 +674,78 @@ function bindTagEditor(sheet, initialTags, suggestions) {
         if (sugEl) sugEl.innerHTML = sugHtml(g, inp ? inp.value : '');
     }
 
-    function addTag(g, raw) {
+    // ── 服装组：单品卡片 + 二级词 ──
+    function garmentCardsHtml() {
+        if (!values.garment.length) return '<span class="om-tagg-none">未选择单品</span>';
+        return values.garment.map(function (it) {
+            var subs = it.subs.map(function (s) {
+                return '<span class="om-garm-sub">' + esc(s) +
+                    '<button type="button" class="om-garm-subdel" data-base="' + esc(it.base) + '" data-sub="' + esc(s) + '"><i class="fa-solid fa-xmark"></i></button></span>';
+            }).join('');
+            return '<div class="om-garm-card" data-base="' + esc(it.base) + '">' +
+                '<div class="om-garm-top"><span class="om-garm-base">' + esc(it.base) + '</span>' +
+                '<span class="om-garm-subs">' + subs + '</span>' +
+                '<button type="button" class="om-garm-del" data-base="' + esc(it.base) + '" title="移除单品"><i class="fa-solid fa-xmark"></i></button></div>' +
+                '<div class="om-garm-addsub"><input type="text" class="om-garm-subinput" data-base="' + esc(it.base) + '" placeholder="+ 颜色/材质/款式后回车" autocomplete="off" /><button type="button" class="om-garm-subadd" data-base="' + esc(it.base) + '"><i class="fa-solid fa-plus"></i></button></div>' +
+                '<div class="om-garm-subsug" data-base="' + esc(it.base) + '"></div>' +
+                '</div>';
+        }).join('');
+    }
+    function garmentSugHtml(g) {
+        var q = (g.querySelector('.om-tagg-input[data-g="garment"]') || { value: '' }).value.trim().toLowerCase();
+        var list = gBases.filter(function (b) {
+            if (findItem(b)) return false;
+            return !q || b.toLowerCase().indexOf(q) !== -1;
+        });
+        return list.slice(0, 30).map(function (b) {
+            return '<button type="button" class="om-tagg-sugbtn" data-g="garment" data-tag="' + esc(b) + '">' + esc(b) + '</button>';
+        }).join('');
+    }
+    function subSugHtml(card, base) {
+        var inp = card.querySelector('.om-garm-subinput');
+        var q = (inp ? inp.value : '').trim().toLowerCase();
+        var item = findItem(base);
+        var have = item ? item.subs : [];
+        var pool = (gSubs[base] || []).filter(function (s) {
+            if (have.indexOf(s) !== -1) return false;
+            return !q || s.toLowerCase().indexOf(q) !== -1;
+        });
+        return pool.slice(0, 20).map(function (s) {
+            return '<button type="button" class="om-garm-sugbtn" data-base="' + esc(base) + '" data-sub="' + esc(s) + '">' + esc(s) + '</button>';
+        }).join('');
+    }
+    function refreshGarment() {
+        var listEl = sheet.querySelector('.om-garm-list[data-g="garment"]');
+        var sugEl = sheet.querySelector('.om-tagg-sug[data-g="garment"]');
+        if (listEl) listEl.innerHTML = garmentCardsHtml();
+        if (sugEl) sugEl.innerHTML = garmentSugHtml(sheet);
+        sheet.querySelectorAll('.om-garm-card').forEach(function (card) {
+            var box = card.querySelector('.om-garm-subsug');
+            if (box) box.innerHTML = subSugHtml(card, card.dataset.base);
+        });
+    }
+
+    function addPlainTag(g, raw) {
         if (TAG_GROUP_KEYS.indexOf(g) === -1) return false;
         var one = normalizeTagList([raw]);
         if (!one.length) return false;
         if (values[g].indexOf(one[0]) === -1) values[g].push(one[0]);
         refresh(g);
+        return true;
+    }
+    function addGarmentBase(raw) {
+        var one = normalizeTagList([raw]);
+        if (!one.length) return false;
+        if (!findItem(one[0]) && values.garment.length < 40) values.garment.push({ base: one[0], subs: [] });
+        refreshGarment();
+        return true;
+    }
+    function addGarmentSub(base, raw) {
+        var one = normalizeTagList([raw]);
+        var item = findItem(base);
+        if (!one.length || !item) return false;
+        if (item.subs.indexOf(one[0]) === -1 && item.subs.length < 12) item.subs.push(one[0]);
+        refreshGarment();
         return true;
     }
 
@@ -541,13 +758,44 @@ function bindTagEditor(sheet, initialTags, suggestions) {
             refresh(g1);
             return;
         }
+        var gdel = e.target.closest('.om-garm-del');
+        if (gdel) {
+            values.garment = values.garment.filter(function (it) { return it.base !== gdel.dataset.base; });
+            refreshGarment();
+            return;
+        }
+        var sdel = e.target.closest('.om-garm-subdel');
+        if (sdel) {
+            var it1 = findItem(sdel.dataset.base);
+            if (it1) {
+                var si = it1.subs.indexOf(sdel.dataset.sub);
+                if (si !== -1) it1.subs.splice(si, 1);
+            }
+            refreshGarment();
+            return;
+        }
+        var gsug = e.target.closest('.om-garm-sugbtn');
+        if (gsug) { addGarmentSub(gsug.dataset.base, gsug.dataset.sub); return; }
         var sug = e.target.closest('.om-tagg-sugbtn');
-        if (sug) { addTag(sug.dataset.g, sug.dataset.tag); return; }
+        if (sug) {
+            if (sug.dataset.g === 'garment') addGarmentBase(sug.dataset.tag);
+            else addPlainTag(sug.dataset.g, sug.dataset.tag);
+            return;
+        }
+        var gadd = e.target.closest('.om-garm-subadd');
+        if (gadd) {
+            var card0 = gadd.closest('.om-garm-card');
+            var inp0 = card0 ? card0.querySelector('.om-garm-subinput') : null;
+            if (addGarmentSub(gadd.dataset.base, inp0 ? inp0.value : '') && inp0) inp0.value = '';
+            return;
+        }
         var addBtn = e.target.closest('.om-tagg-addbtn');
         if (addBtn) {
             var g2 = addBtn.dataset.g;
             var inp2 = sheet.querySelector('.om-tagg-input[data-g="' + g2 + '"]');
-            if (addTag(g2, inp2 ? inp2.value : '') && inp2) inp2.value = '';
+            var val = inp2 ? inp2.value : '';
+            var ok = g2 === 'garment' ? addGarmentBase(val) : addPlainTag(g2, val);
+            if (ok && inp2) inp2.value = '';
         }
     });
 
@@ -556,23 +804,34 @@ function bindTagEditor(sheet, initialTags, suggestions) {
         inp.addEventListener('keydown', function (e) {
             if (e.key !== 'Enter') return;
             e.preventDefault();
-            if (addTag(inp.dataset.g, inp.value)) inp.value = '';
+            var ok = inp.dataset.g === 'garment' ? addGarmentBase(inp.value) : addPlainTag(inp.dataset.g, inp.value);
+            if (ok) inp.value = '';
             refresh(inp.dataset.g);
         });
+    });
+
+    root.addEventListener('input', function (e) {
+        var si = e.target.closest ? e.target.closest('.om-garm-subinput') : null;
+        if (!si) return;
+        var card = si.closest('.om-garm-card');
+        var box = card ? card.querySelector('.om-garm-subsug') : null;
+        if (box) box.innerHTML = subSugHtml(card, si.dataset.base);
+    });
+    root.addEventListener('keydown', function (e) {
+        if (e.key !== 'Enter') return;
+        var si = e.target.closest ? e.target.closest('.om-garm-subinput') : null;
+        if (!si) return;
+        e.preventDefault();
+        if (addGarmentSub(si.dataset.base, si.value)) si.value = '';
     });
 
     TAG_GROUP_KEYS.forEach(refresh);
 
     return {
-        get: function () {
-            var out = emptyTags();
-            TAG_GROUP_KEYS.forEach(function (k) { out[k] = values[k].slice(); });
-            return out;
-        },
+        get: function () { return normalizeTags(values); },
         set: function (raw) {
-            var next = emptyTags();
-            TAG_GROUP_KEYS.forEach(function (k) { next[k] = normalizeTagList(raw && raw[k]); });
-            TAG_GROUP_KEYS.forEach(function (k) { values[k] = next[k]; refresh(k); });
+            values = normalizeTags(raw);
+            TAG_GROUP_KEYS.forEach(refresh);
         }
     };
 }
@@ -765,7 +1024,9 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
     });
 
     // 三组标签编辑器
-    var tagSuggestions = collectTagsByGroup(getAllOutfitLists(d).map(function (list) { return { outfits: list }; }));
+    var _tagLists = getAllOutfitLists(d).map(function (list) { return { outfits: list }; });
+    var tagSuggestions = collectTagsByGroup(_tagLists);
+    tagSuggestions.garment = collectGarmentSuggestions(_tagLists, ensureTagTree(loadMeta()));
     var tagEditor = bindTagEditor(sheet, outfit ? getOutfitTags(outfit) : emptyTags(), tagSuggestions);
 
     // 标签管理面板按钮
@@ -969,6 +1230,7 @@ function openEditSheet(outfit, defaultCat, defaultSubCat) {
             setOutfitTags(newOutfit, tags);
             curP.outfits.unshift(newOutfit);
         }
+        var _tagMeta = loadMeta(); noteTagTreeUsage(_tagMeta, tags); saveMeta(_tagMeta);
         saveCurrent(curP); closeSheet(sheet); toast('✨ 已保存：' + name); fn.renderCatbar(); fn.renderGrid(); fn.renderBottomStatus(); fn.updateBtn();
     });
 }

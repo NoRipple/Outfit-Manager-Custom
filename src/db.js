@@ -686,7 +686,7 @@ function reassembleFullData() {
     var settingsKeys = [
         'mode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
-        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder',
+        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'currentChar'
     ];
     settingsKeys.forEach(function (k) { if (meta[k] !== undefined) d[k] = meta[k]; });
@@ -1266,7 +1266,7 @@ function migrateFromV1(oldData, cb) {
     var settingsKeys = [
         'mode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
-        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder',
+        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView'
     ];
     settingsKeys.forEach(function (k) {
@@ -1460,7 +1460,7 @@ function splitServerDataToPartitions(serverData, cb) {
     var settingsKeys = [
         'mode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
-        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder',
+        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView'
     ];
     settingsKeys.forEach(function (k) {
@@ -1801,6 +1801,18 @@ function validateMetaPayload(data) {
     if (data.showBall !== undefined && typeof data.showBall !== 'boolean') return 'meta.showBall 类型无效';
     if (data.fabSize !== undefined && (typeof data.fabSize !== 'number' || !Number.isFinite(data.fabSize))) return 'meta.fabSize 类型无效';
     if (data.tagOrder !== undefined && (!Array.isArray(data.tagOrder) || data.tagOrder.some(function (item) { return typeof item !== 'string'; }))) return 'meta.tagOrder 类型无效';
+    if (data.tagTree !== undefined) {
+        if (!data.tagTree || typeof data.tagTree !== 'object' || Array.isArray(data.tagTree)) return 'meta.tagTree 类型无效';
+        if (data.tagTree.garment !== undefined) {
+            if (!data.tagTree.garment || typeof data.tagTree.garment !== 'object' || Array.isArray(data.tagTree.garment)) return 'meta.tagTree.garment 类型无效';
+            var treeBad = false;
+            Object.keys(data.tagTree.garment).forEach(function (b) {
+                var arr = data.tagTree.garment[b];
+                if (!Array.isArray(arr) || arr.some(function (s) { return typeof s !== 'string'; })) treeBad = true;
+            });
+            if (treeBad) return 'meta.tagTree.garment 类型无效';
+        }
+    }
     if (data.fabPos !== undefined && data.fabPos !== null && (!data.fabPos || typeof data.fabPos !== 'object' || Array.isArray(data.fabPos) ||
         typeof data.fabPos.top !== 'number' || !Number.isFinite(data.fabPos.top) || typeof data.fabPos.left !== 'number' || !Number.isFinite(data.fabPos.left))) return 'meta.fabPos 类型无效';
     if (data.apiVision !== undefined && (!data.apiVision || typeof data.apiVision !== 'object' || Array.isArray(data.apiVision))) return 'meta.apiVision 类型无效';
@@ -2152,7 +2164,7 @@ export function load() {
     var metaKeys = [
         'mode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
-        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder',
+        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'activePresetId'
     ];
     metaKeys.forEach(function (k) { d[k] = meta[k]; });
@@ -2231,7 +2243,7 @@ export function save(d) {
     var settingsKeys = [
         'mode', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
-        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder',
+        'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'activePresetId'
     ];
     settingsKeys.forEach(function (k) { if (d[k] !== undefined) meta[k] = d[k]; });

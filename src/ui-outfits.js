@@ -431,14 +431,22 @@ export function renderOutfitGrid(area, part) {
             var imgCount = (!state.batchMode && getOutfitImageCount(o) > 1) ? '<div class="om-card-imgcount">' + getOutfitImageCount(o) + '</div>' : '';
             var menuBtn = state.batchMode ? '' : '<button class="om-card-menu" data-id="' + o.id + '" title="操作"><i class="fa-solid fa-ellipsis"></i></button>';
             var tg = getOutfitTags(o);
-            var tagText = tg.scene.length ? tg.scene.join(' · ') : tg.garment.slice(0, 2).join(' · ');
+            var tagHtml = '';
+            if (tg.scene.length) {
+                tagHtml = '<div class="om-card-tag">' + esc(tg.scene.join(' · ')) + '</div>';
+            } else if (tg.garment.length) {
+                tagHtml = '<div class="om-card-tag om-card-garmtags">' + tg.garment.slice(0, 2).map(function (g) {
+                    var subsHtml = (g.subs || []).map(function (s) { return '<span class="om-card-sub">' + esc(s) + '</span>'; }).join('');
+                    return '<span class="om-card-garm">' + esc(g.base) + subsHtml + '</span>';
+                }).join('') + '</div>';
+            }
             html += '<div class="om-card' + (on ? ' on' : '') + (bsel ? ' batch-sel' : '') + (getOutfitPrimaryImage(o) ? '' : ' no-img') + '" data-id="' + o.id + '">' +
                 '<div class="om-card-img">' +
                 checkBox + imgContent + favMark + badge + imgCount + menuBtn +
                 '</div>' +
                 '<div class="om-card-info">' +
                 '<div class="om-card-name">' + esc(o.name) + '</div>' +
-                (tagText ? '<div class="om-card-tag">' + esc(tagText) + '</div>' : '') +
+                tagHtml +
                 '</div>' +
                 '</div>';
         });

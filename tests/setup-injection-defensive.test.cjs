@@ -58,7 +58,7 @@ async function run() {
             }, { context });
         }
         if (specifier === './data.js') {
-            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags'], function () {
+            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags', 'garmentItemText'], function () {
                 this.setExport('SHARED_CHAR_KEY', '__shared__');
                 this.setExport('partGetById', () => null);
                 this.setExport('getActiveKit', () => null);
@@ -66,6 +66,7 @@ async function run() {
                 this.setExport('getOutfitImages', () => []);
                 this.setExport('getOutfitImageCount', () => 0);
                 this.setExport('getOutfitTags', () => ({ scene: [], garment: [], impression: [] }));
+                this.setExport('garmentItemText', () => '');
             }, { context });
         }
         if (specifier === './utils.js') {
