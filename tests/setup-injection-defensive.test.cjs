@@ -78,8 +78,9 @@ async function run() {
             }, { context });
         }
         if (specifier === './bridge.js') {
-            return new vm.SyntheticModule(['state'], function () {
+            return new vm.SyntheticModule(['state', 'fn'], function () {
                 this.setExport('state', {});
+                this.setExport('fn', {});
             }, { context });
         }
         throw new Error('Unexpected import: ' + specifier);

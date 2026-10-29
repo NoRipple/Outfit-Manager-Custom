@@ -118,7 +118,7 @@ async function run() {
             return new vm.SyntheticModule(['toast'], function () { this.setExport('toast', () => {}); }, { context });
         }
         if (specifier === './bridge.js') {
-            return new vm.SyntheticModule(['state'], function () { this.setExport('state', { resolvedImages: {} }); }, { context });
+            return new vm.SyntheticModule(['state', 'fn'], function () { this.setExport('state', { resolvedImages: {} }); this.setExport('fn', {}); }, { context });
         }
         throw new Error('Unexpected import: ' + specifier);
     });

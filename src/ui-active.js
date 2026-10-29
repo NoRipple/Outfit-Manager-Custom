@@ -7,6 +7,7 @@ import { SHARED_CHAR_KEY, partGetById, getOutfitThumb, getOutfitImages, getOutfi
 import { esc } from './utils.js';
 import { fn } from './bridge.js';
 import { getWorn } from './msg-tag.js';
+import { getLastInjected } from './inject.js';
 
 var WIN_ID = 'om-active-win';
 var BTN_ID = 'om-active-ext-btn';
@@ -31,6 +32,8 @@ function ownerLabel(partKey) {
 }
 
 // 汇总当前真正参与注入的穿搭（与 inject.js 的读取逻辑保持一致）
+var _sentFiltered = false;
+
 function collectActive() {
     var items = [];
     var parts = loadActivePartitions();
@@ -41,6 +44,20 @@ function collectActive() {
         for (var i = 0; i < ids.length; i++) {
             var o = partGetById(part, ids[i]);
             if (o) items.push({ owner: ownerLabel(pk), partKey: pk, outfit: o });
+        }
+    }
+    // 随机注入开启时，浮窗只显示「本轮真正发出去」的那几套
+    _sentFiltered = false;
+    var meta = null;
+    try { meta = loadMeta(); } catch (e) {}
+    if (meta && meta.randomInject) {
+        var last = null;
+        try { last = getLastInjected(meta); } catch (e) {}
+        if (last && last.ids && last.ids.length) {
+            var keep = {};
+            for (var k = 0; k < last.ids.length; k++) keep[last.ids[k]] = 1;
+            var picked = items.filter(function (it) { return keep[it.outfit.id]; });
+            if (picked.length) { items = picked; _sentFiltered = true; }
         }
     }
     return items;
@@ -116,7 +133,7 @@ function renderBody() {
     });
     _lastItems = items;
     _lastSig = items.map(function (it) { return it.outfit.id; }).join(',');
-    if (countEl) countEl.textContent = items.length ? '共 ' + items.length + ' 套' : '';
+    if (countEl) countEl.textContent = items.length ? (_sentFiltered ? '本轮 ' + items.length + ' 套' : '共 ' + items.length + ' 套') : '';
     if (!items.length) {
         body.innerHTML = '<div class="om-act-empty">当前没有生效的穿搭。<br><span>在衣柜里激活几套后再来看看。</span></div>';
         return;

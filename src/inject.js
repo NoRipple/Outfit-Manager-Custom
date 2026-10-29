@@ -5,7 +5,7 @@
 import { loadMeta, saveMeta, loadActivePartitions, currentUserPartKey, charNameById, resolveImageForExternal } from './db.js';
 import { SHARED_CHAR_KEY, MARKER_TEMPLATE_DEFAULT, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags, garmentItemText } from './data.js';
 import { toast } from './utils.js';
-import { state } from './bridge.js';
+import { state, fn } from './bridge.js';
 
 var BAIBAOKU_SAVE_GENERATE_PATH = '/api/plugins/baibaoku/v1/chats/save-generate';
 var RECENT_INJECTED_BODY_TTL = 2 * 60 * 1000;
@@ -698,6 +698,7 @@ function tryInjectPayload(p) {
             (ow.outfits || []).forEach(function (o) { sentOutfits.push(o); });
         });
         rememberLastInjected(sentOutfits, mergedText || markerHint || '');
+        try { if (fn.refreshActiveWindow) fn.refreshActiveWindow(); } catch (e) {}
     }
 
     if (ownerImageGroups.length > 0) {
