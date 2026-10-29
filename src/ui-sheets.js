@@ -1454,6 +1454,7 @@ function openSettingsSheet() {
             '<textarea id="om-marker-tpl" rows="6" style="width:100%;resize:vertical;font-family:inherit;font-size:.86em;line-height:1.5">' + esc(d.markerTemplate || MARKER_TEMPLATE_DEFAULT) + '</textarea>' +
             '<div class="om-frow" style="margin-top:6px"><button class="om-btn om-btn-outline" id="om-marker-tpl-reset">恢复默认</button></div>' +
         '</div>',
+        '<div class="om-setting-row om-row-inline"><label>跳过上一楼已穿的穿搭 <span class="om-hint">发下一轮前先看最后一条 AI 回复：正文里已经提到过的穿搭，这一轮不再重复发送（省 token、避免重复描写）。全部都被提到时仍照常发送，避免一条服装信息都没有</span></label><input type="checkbox" class="om-chk" id="om-skip-sent"' + (d.skipSentOutfits !== false ? ' checked' : '') + ' /></div>',
 
         '<div class="om-setting-row"><label>注入位置 <span class="om-hint">Gemini/DeepSeek 建议选\"用户消息\"</span></label><select id="om-inject-pos">',
         '<option value="system"' + (d.injectPosition === 'system' ? ' selected' : '') + '>系统提示末尾</option>',
@@ -1551,6 +1552,7 @@ function openSettingsSheet() {
         var m = loadMeta(); m.markerTemplate = MARKER_TEMPLATE_DEFAULT; saveMeta(m);
         toast('已恢复默认标注文案');
     });
+    sheet.querySelector('#om-skip-sent').addEventListener('change', function () { var m = loadMeta(); m.skipSentOutfits = this.checked; saveMeta(m); });
     sheet.querySelector('#om-image-policy').addEventListener('change', function () { var m = loadMeta(); m.imagePolicy = this.value; saveMeta(m); });
     sheet.querySelector('#om-clear-img-support').addEventListener('click', function () { var m = loadMeta(); m.modelImageSupport = {}; saveMeta(m); toast('已清空图片能力记录'); });
     sheet.querySelector('#om-inject-enabled').addEventListener('change', function () {

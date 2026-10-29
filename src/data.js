@@ -88,6 +88,7 @@ export function defMeta() {
         modelImageSupport: {},      // { 模型名: false } 被接口拒绝过图片的模型
         markerEnabled: true,        // 要求 AI 在回复末尾标注本楼用到的穿搭（正文标记）
         markerTemplate: '',         // 标注规约模板（空=用 MARKER_TEMPLATE_DEFAULT），支持 {{example}} {{list}}
+        skipSentOutfits: true,      // 上一楼正文已经提到过的穿搭，这一轮不再重复发送（省 token）
         injectPosition: 'user',
         // 随机注入（仅对通用衣柜生效）
         randomInject: false,

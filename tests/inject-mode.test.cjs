@@ -42,6 +42,15 @@ async function run() {
         debug: false
     };
 
+    const OUTFIT2 = {
+        id: 'o2',
+        name: '蓝色连衣裙',
+        description: '蓝色棉麻连衣裙，裙摆到小腿。',
+        images: ['/api/plugins/outfit-manager/images/def.jpg'],
+        tags: { scene: ['日常'], garment: [{ base: '连衣裙', subs: ['蓝色'] }], impression: ['清爽'] }
+    };
+    let stubOutfits = [OUTFIT];
+
     let captured = null;
     let rejectImagesOnce = false;
     const okResponse = () => ({ ok: true, status: 200, clone: () => ({ text: () => Promise.resolve('') }) });
@@ -82,7 +91,7 @@ async function run() {
                 this.setExport('loadMeta', () => meta);
                 this.setExport('saveMeta', (m) => { Object.assign(meta, m); });
                 this.setExport('loadActivePartitions', () => ({
-                    'char:__shared__': { outfits: [OUTFIT], activeIds: ['o1'], categories: [], accessories: [], accCategories: [] }
+                    'char:__shared__': { outfits: stubOutfits, activeIds: stubOutfits.map(o => o.id), categories: [], accessories: [], accCategories: [] }
                 }));
                 this.setExport('currentUserPartKey', () => 'user:__default__');
                 this.setExport('charNameById', () => '');
@@ -92,14 +101,14 @@ async function run() {
         if (specifier === './data.js') {
             return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags', 'garmentItemText', 'MARKER_TEMPLATE_DEFAULT'], function () {
                 this.setExport('SHARED_CHAR_KEY', '__shared__');
-                this.setExport('partGetById', (part, id) => (id === 'o1' ? OUTFIT : null));
+                this.setExport('MARKER_TEMPLATE_DEFAULT', '【穿搭标注】用 <Outfit-Manager-Custom>{{example}}</Outfit-Manager-Custom> 标注；可用：{{list}}。');
+                this.setExport('partGetById', (part, id) => stubOutfits.find(o => o.id === id) || null);
                 this.setExport('getActiveKit', () => null);
                 this.setExport('getKitAccessories', () => []);
                 this.setExport('getOutfitImages', (o) => (o && o.images) || []);
                 this.setExport('getOutfitImageCount', (o) => ((o && o.images) || []).length);
                 this.setExport('getOutfitTags', (o) => (o && o.tags) || { scene: [], garment: [], impression: [] });
                 this.setExport('garmentItemText', (g, sep) => {
-                this.setExport('MARKER_TEMPLATE_DEFAULT', '【穿搭标注】用 <Outfit-Manager-Custom>{{example}}</Outfit-Manager-Custom> 标注；可用：{{list}}。');
                     const subs = (g && g.subs) || [];
                     return g.base + (subs.length ? '（' + subs.join(sep || '、') + '）' : '');
                 });
@@ -199,6 +208,47 @@ async function run() {
     assert.ok(captured, '学习：重发应捕获请求体');
     assert.equal(captured.indexOf('image_url'), -1, '学习：重发的请求体不应包含图片');
     assert.equal(meta.modelImageSupport['deepseek-v4.1-flash'], false, '学习：应记住该模型不接受图片');
+
+    // 跳过上一楼已穿：识别最后一条 AI 回复 + 判断穿搭是否被提到
+    const ns = mod.namespace;
+    assert.equal(ns.lastAssistantText({ messages: [{ role: 'user', content: 'hi' }, { role: 'assistant', content: '我穿着测试穿搭出门了' }] }), '我穿着测试穿搭出门了', '跳过：应取最后一条 assistant 正文');
+    assert.equal(ns.lastAssistantText({ messages: [{ role: 'assistant', content: '第一楼' }, { role: 'user', content: '第二楼用户' }] }), '第一楼', '跳过：只看 assistant，用户消息不算');
+    assert.equal(ns.outfitMentioned('我穿着测试穿搭出门了', OUTFIT), true, '跳过：名字被提到应命中');
+    assert.equal(ns.outfitMentioned('她换上了另一件裙子', OUTFIT), false, '跳过：没提到不应命中');
+    assert.equal(ns.outfitMentioned('穿搭', OUTFIT), false, '跳过：名字太短（<3 字）不参与判断，避免误杀');
+    assert.equal(ns.outfitMentioned('', OUTFIT), false, '跳过：空正文不应命中');
+
+    // 跳过上一楼已穿（集成）：两套激活，上一楼提到 A → 只发 B
+    stubOutfits = [OUTFIT, OUTFIT2];
+    meta.injectMode = 'tag_text';
+    meta.skipSentOutfits = true;
+    captured = null;
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
+        { role: 'user', content: '今天穿什么' },
+        { role: 'assistant', content: '她换上了测试穿搭就出门了。' },
+        { role: 'user', content: '继续' }
+    ] }) });
+    assert.ok(captured.indexOf('蓝色棉麻连衣裙') !== -1, '跳过：未被提到的穿搭应照常发送');
+    assert.equal(captured.indexOf('白色衬衫配米色长裤'), -1, '跳过：上一楼已提到的穿搭不应再发');
+
+    // 全部都被提到时保留，避免一条服装信息都没有
+    captured = null;
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
+        { role: 'assistant', content: '她先穿测试穿搭，后来换了蓝色连衣裙。' },
+        { role: 'user', content: '继续' }
+    ] }) });
+    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1 && captured.indexOf('蓝色棉麻连衣裙') !== -1, '跳过：全被提到时应保留原样');
+
+    // 开关关闭时不做跳过
+    meta.skipSentOutfits = false;
+    captured = null;
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body: JSON.stringify({ messages: [
+        { role: 'assistant', content: '她换上了测试穿搭就出门了。' },
+        { role: 'user', content: '继续' }
+    ] }) });
+    assert.ok(captured.indexOf('白色衬衫配米色长裤') !== -1, '跳过关闭：已提到也照常发送');
+    stubOutfits = [OUTFIT];
+    meta.skipSentOutfits = true;
 
     console.log('inject-mode: pass (tag / tag_text / tag_text_image / 旧配置默认 / 标记提示 / 多模态照常带图 / 已学习跳过 / never 策略 / 拒绝后自动重发)');
 }

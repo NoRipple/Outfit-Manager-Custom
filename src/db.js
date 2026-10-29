@@ -684,7 +684,7 @@ function reassembleFullData() {
 
     // 设置字段
     var settingsKeys = [
-        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'skipSentOutfits', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'currentChar'
@@ -1264,7 +1264,7 @@ function migrateFromV1(oldData, cb) {
 
     // ── 提取设置到 meta ──
     var settingsKeys = [
-        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'skipSentOutfits', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView'
@@ -1458,7 +1458,7 @@ function splitServerDataToPartitions(serverData, cb) {
     var entries = [];
 
     var settingsKeys = [
-        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'skipSentOutfits', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView'
@@ -1801,6 +1801,7 @@ function validateMetaPayload(data) {
     if (data.debug !== undefined && typeof data.debug !== 'boolean') return 'meta.debug 类型无效';
     if (data.markerEnabled !== undefined && typeof data.markerEnabled !== 'boolean') return 'meta.markerEnabled 类型无效';
     if (data.markerTemplate !== undefined && typeof data.markerTemplate !== 'string') return 'meta.markerTemplate 类型无效';
+    if (data.skipSentOutfits !== undefined && typeof data.skipSentOutfits !== 'boolean') return 'meta.skipSentOutfits 类型无效';
     if (data.imagePolicy !== undefined && ['auto', 'always', 'never'].indexOf(data.imagePolicy) === -1) return 'meta.imagePolicy 类型无效';
     if (data.modelImageSupport !== undefined && (typeof data.modelImageSupport !== 'object' || data.modelImageSupport === null || Array.isArray(data.modelImageSupport))) return 'meta.modelImageSupport 类型无效';
     if (data.showBall !== undefined && typeof data.showBall !== 'boolean') return 'meta.showBall 类型无效';
@@ -2167,7 +2168,7 @@ export function load() {
     var d = {};
     // meta 设置字段
     var metaKeys = [
-        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'skipSentOutfits', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'activePresetId'
@@ -2246,7 +2247,7 @@ export function save(d) {
 
     // ── 1. meta 设置字段 ──
     var settingsKeys = [
-        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
+        'mode', 'injectMode', 'markerEnabled', 'markerTemplate', 'skipSentOutfits', 'imagePolicy', 'modelImageSupport', 'injectPosition', 'injectEnabled', 'randomInject', 'randomInjectCount', 'singleTemplate', 'multiTemplate',
         'charSingleTemplate', 'charMultiTemplate', 'imagePrompt', 'multiImagePrompt',
         'debug', 'apiVision', 'showBall', 'fabImage', 'fabSize', 'fabPos', 'tagOrder', 'tagTree',
         'currentView', 'activePresetId'

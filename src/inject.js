@@ -109,6 +109,36 @@ function buildMarkerHint(owners) {
     return '\n\n' + text;
 }
 
+// ── 判断「上一楼是否已经穿过」 ────────────────────────────
+function contentToText(c) {
+    if (typeof c === 'string') return c;
+    if (Array.isArray(c)) {
+        return c.map(function (part) {
+            if (!part) return '';
+            if (typeof part === 'string') return part;
+            return typeof part.text === 'string' ? part.text : '';
+        }).join('\n');
+    }
+    return '';
+}
+
+// 请求体里最后一条 assistant 消息的正文
+function lastAssistantText(p) {
+    if (!p || !Array.isArray(p.messages)) return '';
+    for (var i = p.messages.length - 1; i >= 0; i--) {
+        var m = p.messages[i];
+        if (m && m.role === 'assistant') return contentToText(m.content);
+    }
+    return '';
+}
+
+// 正文里是否提到了这套穿搭（名字太短容易误判，至少 3 个字才算）
+function outfitMentioned(text, o) {
+    var name = String((o && o.name) || '').trim();
+    if (name.length < 3) return false;
+    return text.indexOf(name) !== -1;
+}
+
 // 从列表中随机抽取 n 项（Fisher-Yates 部分洗牌），返回新数组，不修改入参
 function pickRandomOutfits(outs, n) {
     if (!outs || outs.length === 0) return [];
@@ -507,6 +537,29 @@ function tryInjectPayload(p) {
 
     if (owners.length === 0) return null;
 
+    // ── 上一楼已经穿过的穿搭不再重复发送 ──
+    // 判定依据：请求体里最后一条 assistant 消息的正文是否提到了这套穿搭的名字
+    //（正文标记 <Outfit-Manager-Custom>名称/角色</...> 里也含名字，同样能命中）
+    if (meta.skipSentOutfits !== false) {
+        var lastText = lastAssistantText(p);
+        if (lastText) {
+            var before = 0, after = 0;
+            owners.forEach(function (ow) { before += (ow.outfits || []).length; });
+            var kept = [];
+            owners.forEach(function (ow) {
+                var list = (ow.outfits || []).filter(function (o) { return !outfitMentioned(lastText, o); });
+                after += list.length;
+                if (!list.length) return;
+                var copy = {};
+                for (var k in ow) copy[k] = ow[k];
+                copy.outfits = list;
+                kept.push(copy);
+            });
+            // 全部都被判为「已穿过」时保留原样：宁可重复，也不能一条服装信息都不发
+            if (after > 0 && after < before) owners = kept;
+        }
+    }
+
     // ── 组装注入内容（v2 + 单品支持）──
     var allTextParts = [];
     var ownerImageGroups = [];
@@ -766,3 +819,6 @@ export function setupInjection() {
         };
     }
 }
+
+// 供测试使用：判断上一楼是否已经穿过某套穿搭
+export { lastAssistantText, outfitMentioned };
