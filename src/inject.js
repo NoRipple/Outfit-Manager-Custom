@@ -3,7 +3,7 @@
 // v2: 使用 loadMeta() + loadActivePartitions() 代替旧 load() 全量读取
 
 import { loadMeta, saveMeta, loadActivePartitions, currentUserPartKey, charNameById, resolveImageForExternal } from './db.js';
-import { SHARED_CHAR_KEY, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags, garmentItemText } from './data.js';
+import { SHARED_CHAR_KEY, MARKER_TEMPLATE_DEFAULT, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags, garmentItemText } from './data.js';
 import { toast } from './utils.js';
 import { state } from './bridge.js';
 
@@ -87,17 +87,26 @@ function rememberNoImageSupport(modelName) {
 }
 
 // 让 AI 在回复末尾标注本楼用到的穿搭（正文标记格式）
+// 文案取自 meta.markerTemplate（可在设置里改），占位符：{{example}} {{list}}
 function buildMarkerHint(owners) {
     var list = [];
+    var samplePairs = [];
     owners.forEach(function (ow) {
         var names = (ow.outfits || []).slice(0, 12).map(function (o) { return (o.name || '').trim(); }).filter(Boolean);
-        if (names.length) list.push(ow.name + ' → ' + names.join('、'));
+        if (!names.length) return;
+        list.push(ow.name + ' → ' + names.join('、'));
+        // 示例取前两个衣柜，各配一套，示范「多套用 + 连接」
+        if (samplePairs.length < 2) samplePairs.push(names[0] + '/' + ow.name);
     });
     if (!list.length) return '';
-    var sample = owners.length ? ((owners[0].outfits && owners[0].outfits[0] && owners[0].outfits[0].name) || '穿搭名称') + '/' + owners[0].name : '穿搭名称/角色';
-    return '\n\n【穿搭标注】本楼回复的最后另起一行，用 <Outfit-Manager-Custom>名称/角色</Outfit-Manager-Custom> 标出这一楼实际用到的穿搭，' +
-        '多套用 + 连接，例如 <Outfit-Manager-Custom>' + sample + '</Outfit-Manager-Custom>；名称必须与下面的清单完全一致，角色写衣柜主人。可用：' +
-        list.join('；') + '。';
+    var sample = samplePairs.join('+') || '穿搭名称/角色';
+    var tpl = '';
+    try { tpl = String(loadMeta().markerTemplate || '').trim(); } catch (e) {}
+    if (!tpl) tpl = MARKER_TEMPLATE_DEFAULT;
+    var text = tpl.split('{{example}}').join(sample).split('{{list}}').join(list.join('；'));
+    // 模板里没写占位符时，至少把清单补在末尾，避免 AI 拿不到可用名单
+    if (text.indexOf('{{') === -1 && text.indexOf(list[0]) === -1) text += '可用：' + list.join('；') + '。';
+    return '\n\n' + text;
 }
 
 // 从列表中随机抽取 n 项（Fisher-Yates 部分洗牌），返回新数组，不修改入参

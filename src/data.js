@@ -16,6 +16,13 @@ export var LEGACY_VISION_PROMPT = '用JSON回复（不要代码块）：{"name":
 // 上一版（扁平 garment）默认 prompt，也自动升级成两级
 export var PREV_VISION_PROMPT_FLAT = '用JSON回复（不要代码块）：{"name":"穿搭名称6字以内","description":"描述服装类型颜色材质款式搭配，只写服装不写人，100-200字","tags":{"scene":["场景"],"garment":["单品"],"impression":["气质"]}}';
 
+// ── 正文穿搭标注规约（可在设置里改）──
+// 占位符：{{example}} = 示例标记内容（如 墨绿雪纺短坎肩礼服/宋绮云+浅紫雪纺短坎肩礼服/王申爱）
+//         {{list}}    = 当前可用的「衣柜名 → 穿搭名、穿搭名」清单
+export var MARKER_TEMPLATE_DEFAULT =
+    '【穿搭标注】本楼回复的最后另起一行，用 <Outfit-Manager-Custom>名称/角色</Outfit-Manager-Custom> 标出这一楼实际用到的穿搭，' +
+    '多套用 + 连接，例如 <Outfit-Manager-Custom>{{example}}</Outfit-Manager-Custom>；名称必须与下面的清单完全一致，角色写衣柜主人。可用：{{list}}。';
+
 // ── 标签分析 Prompt 默认值（独立接口，只产出 tags）──
 // 用户可自行修改：往三个大类里塞什么词、怎么塞，都由这个提示词规定。
 export var TAG_PROMPT_DEFAULT = [
@@ -80,6 +87,7 @@ export function defMeta() {
         imagePolicy: 'auto',        // 图片策略：auto 实测学习 / always 始终带图 / never 从不带图
         modelImageSupport: {},      // { 模型名: false } 被接口拒绝过图片的模型
         markerEnabled: true,        // 要求 AI 在回复末尾标注本楼用到的穿搭（正文标记）
+        markerTemplate: '',         // 标注规约模板（空=用 MARKER_TEMPLATE_DEFAULT），支持 {{example}} {{list}}
         injectPosition: 'user',
         // 随机注入（仅对通用衣柜生效）
         randomInject: false,

@@ -2,7 +2,7 @@
 // 操作菜单、编辑面板、预设、设置、分类管理、Lightbox、导入导出、批量描述
 
 import { load, save, loadMeta, saveMeta, loadCurrent, saveCurrent, loadPartition, savePartition, currentPartKey, syncActivePartitions, charNameById, isServerMode, uploadImage } from './db.js';
-import { def, getCharData, getViewOutfits, getViewCategories, getViewActiveIds, setViewActiveIds, getById, getViewById, isActive, getCatNames, getSubCats, findCatObj, hasSubCats, partGetById, partIsActive, partGetAccById, cleanAccIdFromKits, getActiveKit, getKitAccessories, ensureOutfitKits, getOutfitImages, getOutfitPrimaryImage, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, TAG_GROUPS, TAG_GROUP_KEYS, emptyTags, getOutfitTags, setOutfitTags, normalizeTagList, normalizeTags, collectTagsByGroup, collectGarmentSuggestions, noteTagTreeUsage, ensureTagTree, garmentItemText, flattenGarmentTags, addOutfitGarmentSub } from './data.js';
+import { def, getCharData, getViewOutfits, getViewCategories, getViewActiveIds, setViewActiveIds, getById, getViewById, isActive, getCatNames, getSubCats, findCatObj, hasSubCats, partGetById, partIsActive, partGetAccById, cleanAccIdFromKits, getActiveKit, getKitAccessories, ensureOutfitKits, getOutfitImages, getOutfitPrimaryImage, SHARED_CHAR_KEY, SHARED_CHAR_LABEL, MARKER_TEMPLATE_DEFAULT, TAG_GROUPS, TAG_GROUP_KEYS, emptyTags, getOutfitTags, setOutfitTags, normalizeTagList, normalizeTags, collectTagsByGroup, collectGarmentSuggestions, noteTagTreeUsage, ensureTagTree, garmentItemText, flattenGarmentTags, addOutfitGarmentSub } from './data.js';
 import { genId, esc, toast, getPopupLayer, compressImage } from './utils.js';
 import { generateSingleDescription, generateSingleAccDescription, generateSingleTags, batchGenerateDescriptions, openModelPicker, normalizeEndpoint } from './api.js';
 import { state, fn } from './bridge.js';
@@ -1449,7 +1449,11 @@ function openSettingsSheet() {
         '<option value="never"' + (d.imagePolicy === 'never' ? ' selected' : '') + '>从不带图</option>' +
         '</select></div>',
         '<div class="om-setting-row om-row-inline"><label>图片能力记录 <span class="om-hint">曾被接口拒绝过图片的模型会记在这里，下次直接跳过图片；换模型或接口支持图片后点这里清空</span></label><button class="om-btn om-btn-outline" id="om-clear-img-support">清空记录</button></div>',
-        '<div class="om-setting-row om-row-inline"><label>要求 AI 标注本楼穿搭 <span class="om-hint">在注入内容里附名称清单，让 AI 回复末尾输出 &lt;Outfit-Manager-Custom&gt;名称/角色+…&lt;/Outfit-Manager-Custom&gt;，插件会把它渲染成可点卡片</span></label><input type="checkbox" class="om-chk" id="om-marker-enabled"' + (d.markerEnabled !== false ? ' checked' : '') + ' /></div>',
+        '<div class="om-setting-row om-row-inline"><label>要求 AI 标注本楼穿搭 <span class="om-hint">在注入内容里附名称清单，让 AI 回复末尾输出 &lt;Outfit-Manager-Custom&gt;名称/角色+…&lt;/Outfit-Manager-Custom&gt;，插件会在左下角浮窗里标出本楼穿着</span></label><input type="checkbox" class="om-chk" id="om-marker-enabled"' + (d.markerEnabled !== false ? ' checked' : '') + ' /></div>',
+        '<div class="om-setting-row"><label>标注规约文案 <span class="om-hint">{{example}} = 示例标记（自动取前两个衣柜各一套），{{list}} = 当前可用穿搭清单；留空则用默认</span></label>' +
+            '<textarea id="om-marker-tpl" rows="6" style="width:100%;resize:vertical;font-family:inherit;font-size:.86em;line-height:1.5">' + esc(d.markerTemplate || MARKER_TEMPLATE_DEFAULT) + '</textarea>' +
+            '<div class="om-frow" style="margin-top:6px"><button class="om-btn om-btn-outline" id="om-marker-tpl-reset">恢复默认</button></div>' +
+        '</div>',
 
         '<div class="om-setting-row"><label>注入位置 <span class="om-hint">Gemini/DeepSeek 建议选\"用户消息\"</span></label><select id="om-inject-pos">',
         '<option value="system"' + (d.injectPosition === 'system' ? ' selected' : '') + '>系统提示末尾</option>',
@@ -1541,6 +1545,12 @@ function openSettingsSheet() {
 
     sheet.querySelector('#om-inject-mode').addEventListener('change', function () { var m = loadMeta(); m.injectMode = this.value; saveMeta(m); });
     sheet.querySelector('#om-marker-enabled').addEventListener('change', function () { var m = loadMeta(); m.markerEnabled = this.checked; saveMeta(m); });
+    sheet.querySelector('#om-marker-tpl').addEventListener('input', function () { var m = loadMeta(); m.markerTemplate = this.value; saveMeta(m); });
+    sheet.querySelector('#om-marker-tpl-reset').addEventListener('click', function () {
+        sheet.querySelector('#om-marker-tpl').value = MARKER_TEMPLATE_DEFAULT;
+        var m = loadMeta(); m.markerTemplate = MARKER_TEMPLATE_DEFAULT; saveMeta(m);
+        toast('已恢复默认标注文案');
+    });
     sheet.querySelector('#om-image-policy').addEventListener('change', function () { var m = loadMeta(); m.imagePolicy = this.value; saveMeta(m); });
     sheet.querySelector('#om-clear-img-support').addEventListener('click', function () { var m = loadMeta(); m.modelImageSupport = {}; saveMeta(m); toast('已清空图片能力记录'); });
     sheet.querySelector('#om-inject-enabled').addEventListener('change', function () {

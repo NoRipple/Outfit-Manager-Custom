@@ -60,19 +60,22 @@ function nameMatches(o, name) {
 
 // 名称 + 角色 → 穿搭
 function resolveEntry(entry) {
-    var pools = allPartitions();
+    var all = allPartitions();
+    var pools = all;
     if (entry.owner) {
-        pools = pools.filter(function (p) {
+        var filtered = all.filter(function (p) {
             var lab = ownerOf(p.partKey);
             return lab === entry.owner || p.partKey === entry.owner;
         });
+        // 对不上衣柜时退回全量：AI 可能写的是角色名，而不是衣柜名
+        if (filtered.length) pools = filtered;
     }
     var i, j;
     for (i = 0; i < pools.length; i++) {
         var outfits = pools[i].part.outfits || [];
         for (j = 0; j < outfits.length; j++) {
             if (nameMatches(outfits[j], entry.name)) {
-                return { outfit: outfits[j], owner: ownerOf(pools[i].partKey) };
+                return { outfit: outfits[j], owner: entry.owner || ownerOf(pools[i].partKey) };
             }
         }
     }
@@ -82,7 +85,7 @@ function resolveEntry(entry) {
         for (j = 0; j < os.length; j++) {
             var n = String(os[j].name || '');
             if (n && (n.indexOf(entry.name) !== -1 || entry.name.indexOf(n) !== -1)) {
-                return { outfit: os[j], owner: ownerOf(pools[i].partKey) };
+                return { outfit: os[j], owner: entry.owner || ownerOf(pools[i].partKey) };
             }
         }
     }

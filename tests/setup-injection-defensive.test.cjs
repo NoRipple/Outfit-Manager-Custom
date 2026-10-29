@@ -60,7 +60,7 @@ async function run() {
             }, { context });
         }
         if (specifier === './data.js') {
-            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags', 'garmentItemText'], function () {
+            return new vm.SyntheticModule(['SHARED_CHAR_KEY', 'partGetById', 'getActiveKit', 'getKitAccessories', 'getOutfitImages', 'getOutfitImageCount', 'getOutfitTags', 'garmentItemText', 'MARKER_TEMPLATE_DEFAULT'], function () {
                 this.setExport('SHARED_CHAR_KEY', '__shared__');
                 this.setExport('partGetById', () => null);
                 this.setExport('getActiveKit', () => null);
@@ -69,6 +69,7 @@ async function run() {
                 this.setExport('getOutfitImageCount', () => 0);
                 this.setExport('getOutfitTags', () => ({ scene: [], garment: [], impression: [] }));
                 this.setExport('garmentItemText', () => '');
+                this.setExport('MARKER_TEMPLATE_DEFAULT', '【穿搭标注】用 <Outfit-Manager-Custom>{{example}}</Outfit-Manager-Custom> 标注；可用：{{list}}。');
             }, { context });
         }
         if (specifier === './utils.js') {
