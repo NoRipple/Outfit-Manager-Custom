@@ -5,7 +5,7 @@
 import { loadMeta, saveMeta, loadActivePartitions, currentUserPartKey, charNameById, resolveImageForExternal } from './db.js';
 import { SHARED_CHAR_KEY, MARKER_TEMPLATE_DEFAULT, partGetById, getActiveKit, getKitAccessories, getOutfitImages, getOutfitImageCount, getOutfitTags, garmentItemText } from './data.js';
 import { toast } from './utils.js';
-import { state, fn } from './bridge.js';
+import { state, fn, putResolvedImages, getResolvedImages } from './bridge.js';
 
 var BAIBAOKU_SAVE_GENERATE_PATH = '/api/plugins/baibaoku/v1/chats/save-generate';
 var RECENT_INJECTED_BODY_TTL = 2 * 60 * 1000;
@@ -180,6 +180,22 @@ function pickRandomOutfits(outs, n) {
     return pool.slice(0, count);
 }
 
+// 「这一轮随机抽哪几套」的唯一规则（注入与浮窗共用，保证两边看到的完全一致）
+// count <= 0 时按 1 套算；候选不足 count 时全发
+export function pickRandomSlice(list, count) {
+    var n = (typeof count === 'number' && count > 0) ? Math.floor(count) : 1;
+    var arr = list || [];
+    if (arr.length === 0) return [];
+    if (arr.length <= n) return arr.slice();
+    return pickRandomOutfits(arr, n);
+}
+
+// 取当前生效的随机注入数量（meta.randomInjectCount，非正数按 1 算）
+export function getRandomInjectCount(meta) {
+    return (meta && typeof meta.randomInjectCount === 'number' && meta.randomInjectCount > 0)
+        ? Math.floor(meta.randomInjectCount) : 1;
+}
+
 // 手动/事件刷新随机切片：清空缓存，下一次注入重新随机抽取
 export function clearRandomInjectCache() {
     randomCache = {};
@@ -190,8 +206,8 @@ function getInjectImageUrls(outfit) {
     var imgs = getOutfitImages(outfit);
     if (!imgs || imgs.length === 0) return [];
     // 检查预解析缓存
-    if (state.resolvedImages && state.resolvedImages[outfit.id]) {
-        var cached = state.resolvedImages[outfit.id];
+    if (state.resolvedImages && getResolvedImages(outfit.id)) {
+        var cached = getResolvedImages(outfit.id);
         if (cached.urls && cached.dataUrls && cached.urls.length === imgs.length) {
             var same = true;
             for (var i = 0; i < imgs.length; i++) {
@@ -227,7 +243,7 @@ function warmActiveImages() {
                     if (!o) return;
                     var imgs = getOutfitImages(o);
                     if (!imgs.length) return;
-                    var cached = state.resolvedImages && state.resolvedImages[o.id];
+                    var cached = getResolvedImages(o.id);
                     if (cached && cached.urls && cached.urls.length === imgs.length) {
                         var same = true;
                         for (var i = 0; i < imgs.length; i++) {
@@ -239,7 +255,7 @@ function warmActiveImages() {
                         var resolved = new Array(imgs.length);
                         var pending = imgs.length;
                         var finish = function () {
-                            state.resolvedImages[o.id] = { urls: imgs.slice(), dataUrls: resolved.slice() };
+                            putResolvedImages(o.id, { urls: imgs.slice(), dataUrls: resolved.slice() });
                             resolve();
                         };
                         imgs.forEach(function (u, i) {
@@ -383,15 +399,29 @@ function cleanupRecentInjectedBodies(now) {
 function rememberInjectedBody(p) {
     try {
         cleanupRecentInjectedBodies();
-        recentInjectedBodies.push({ body: JSON.stringify(p), at: Date.now() });
+        recentInjectedBodies.push({ body: fingerprintBody(p), at: Date.now() });
         if (recentInjectedBodies.length > 20) recentInjectedBodies.shift();
     } catch (e) {}
 }
 
+// 只留指纹（长度 + 64 位哈希），不留整份请求体。
+// 原来存 JSON 原文，单条可达数百 KB、最多 20 条且 TTL 2 分钟，等于每轮请求都整份复制持久在内存里。
+function fingerprintBody(p) {
+    var s = JSON.stringify(p);
+    var h1 = 0x811c9dc5, h2 = 0x1000193;
+    for (var i = 0; i < s.length; i++) {
+        var c = s.charCodeAt(i);
+        h1 = ((h1 ^ c) * 16777619) >>> 0;
+        h2 = ((h2 + c) * 2654435761) >>> 0;
+    }
+    return s.length + ':' + h1.toString(36) + '.' + h2.toString(36);
+}
+
 function wasRecentlyInjectedBody(bodyStr) {
     cleanupRecentInjectedBodies();
+    var fp = fingerprintBody(bodyStr);
     for (var i = 0; i < recentInjectedBodies.length; i++) {
-        if (recentInjectedBodies[i].body === bodyStr) return true;
+        if (recentInjectedBodies[i].body === fp) return true;
     }
     return false;
 }
@@ -575,12 +605,20 @@ function tryInjectPayload(p) {
     }
 
     // 过滤后没有可发的穿搭：直接不注入
-    if (owners.length === 0) return false;
+    // 本轮确实没有穿搭进入聊天（全部都在上一轮发过）→ 如实记成空，浮窗据此显示「本轮没有穿搭」
+    if (owners.length === 0) {
+        if (meta.randomInject || meta.skipSentOutfits !== false) {
+            try {
+                rememberLastInjected([], '');
+                try { if (fn.refreshActiveWindow) fn.refreshActiveWindow(); } catch (e) {}
+            } catch (e) {}
+        }
+        return false;
+    }
 
     // ── 随机注入：每个衣柜各自按「固定数量」抽，抽完缓存；候选集变了才重抽 ──
     if (meta.randomInject) {
-        var randCount = (typeof meta.randomInjectCount === 'number' && meta.randomInjectCount > 0)
-            ? Math.floor(meta.randomInjectCount) : 1;
+        var randCount = getRandomInjectCount(meta);
         owners.forEach(function (ow) {
             var list = ow.outfits || [];
             if (list.length <= randCount) return;
@@ -590,7 +628,7 @@ function tryInjectPayload(p) {
                 ow.outfits = cached.outfits;
                 return;
             }
-            ow.outfits = pickRandomOutfits(list, randCount);
+            ow.outfits = pickRandomSlice(list, randCount);
             randomCache[ow.partKey] = { sig: sig, outfits: ow.outfits };
         });
     } else {
@@ -867,4 +905,4 @@ export function setupInjection() {
 }
 
 // 供测试使用：判断上一楼是否已经穿过某套穿搭
-export { getLastInjected, wasSentLastRound, chatScopeKey, rememberLastInjected };
+export { getLastInjected, wasSentLastRound, chatScopeKey, rememberLastInjected, rememberLastInjected as recordLastInjected };

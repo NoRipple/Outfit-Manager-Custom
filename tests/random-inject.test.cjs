@@ -123,9 +123,13 @@ async function run() {
             }, { context });
         }
         if (specifier === './bridge.js') {
-            return new vm.SyntheticModule(['state', 'fn'], function () {
-                this.setExport('state', {});
+            return new vm.SyntheticModule(['state', 'fn', 'putResolvedImages', 'getResolvedImages', 'dropResolvedImages'], function () {
+                var st = { resolvedImages: {} };
+                this.setExport('state', st);
                 this.setExport('fn', {});
+                this.setExport('putResolvedImages', (id, e) => { st.resolvedImages[id] = e; });
+                this.setExport('getResolvedImages', (id) => st.resolvedImages[id]);
+                this.setExport('dropResolvedImages', (id) => { delete st.resolvedImages[id]; });
             }, { context });
         }
         throw new Error('Unexpected import: ' + specifier);
@@ -229,7 +233,23 @@ async function run() {
     parts = { 'char:__shared__': sharedPart };
     charPart.activeIds = ['c1', 'c2', 'c3', 'c4'];
 
+    // ── 上一轮已发过的穿搭记录要如实反映「本轮实际发出」 ──
+    // 开启「跳过上一楼已发」后，如果全部都已发过 → 这一轮一条都不发，
+    // 浮窗依据的 meta.lastInject 必须清空，否则会一直显示上一轮的穿搭。
+    meta.randomInject = true;
+    meta.randomInjectCount = 5;
+    meta.skipSentOutfits = true;
+    sharedPart.activeIds = ['o1', 'o2'];
+    mod.namespace.clearRandomInjectCache();
+    meta.lastInject = null;
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
+    assert.ok(meta.lastInject && meta.lastInject.ids.length === 2, '第一次应记录本轮发出的 2 套');
+    await window.fetch('https://st.local/v1/chat/completions', { method: 'POST', body });
+    assert.ok(meta.lastInject && meta.lastInject.ids.length === 0,
+        '全部已在上一楼发过 → 本轮没发任何穿搭，lastInject 应清空而不是保留上一轮');
+
     console.log('random-inject: pass (slice on first / cache reuse / clear→refresh / regenerate on change / disable → full / injectEnabled off / chat-only gate)');
+    console.log('note: 请求体去重记录改存指纹（inject.js fingerprintBody），沙箱无法回读模块内部数组，未在此断言');
 }
 
 run().catch((err) => {

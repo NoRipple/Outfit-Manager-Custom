@@ -5,6 +5,7 @@
 // partition: { outfits, categories, activeIds } 按 user/char 独立存储
 
 import { defMeta, defPartition, ensureMetaDefaults, ensurePartDefaults, migrateCategories, upgradeLegacyVisionPrompt, SHARED_CHAR_KEY } from './data.js';
+import { dropResolvedImages } from './bridge.js';
 
 // 8位随机ID生成（用于 charId / presetId）
 var ID_CHARS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
@@ -339,9 +340,13 @@ function serverPutFull() {
 }
 
 function doServerPut() {
-    var full = reassembleFullData();
     var raw;
-    try { raw = JSON.stringify(full); }
+    try {
+        // 组装出来的整包对象只活在这一行里：直接 JSON.stringify 掉，不赋给变量，
+        // 让它在 fetch 之前就可以被回收，避免「整包对象 + JSON 字符串」两份同时常驻
+        // （1400 套衣柜时整包 JSON 可达数十 MB，峰值内存直接翻倍）
+        raw = JSON.stringify(reassembleFullData());
+    }
     catch (err) { serverDirty = true; scheduleServerPutRetry(); return; }
     serverPutInFlight = true;
     var revisionAtDispatch = serverRevision;
@@ -901,7 +906,48 @@ export function saveMeta(meta) {
         if (ok) commitPendingPartitionDeletes(false);
     });
     scheduleServerPutKey('meta');
+    if (!_suppressDataNotify) notifyDataSaved('meta');
     return true;
+}
+
+// ── 数据变化通知（事件驱动，替代浮窗的定时轮询）──────────────
+// 任何 meta / partition 写入后都会触发；监听方自行做轻量比较，没变化就不重绘。
+var _dataSavedListeners = [];
+var _notifyQueued = false;
+var _notifyKinds = {};
+var _suppressDataNotify = false;
+
+export function onDataSaved(fn2) {
+    if (typeof fn2 === 'function' && _dataSavedListeners.indexOf(fn2) === -1) _dataSavedListeners.push(fn2);
+}
+
+// 迁移 / 导入等批量写入：包起来，期间不逐条通知，结束后统一通知一次
+export function withDataNotifySuppressed(work) {
+    var prev = _suppressDataNotify;
+    _suppressDataNotify = true;
+    try { return work(); }
+    finally {
+        _suppressDataNotify = prev;
+        if (!prev) notifyDataSaved('bulk');
+    }
+}
+
+function notifyDataSaved(kind) {
+    if (!_dataSavedListeners.length) return;
+    // 一轮操作里可能连续写好几次（批量激活等），合并到下一个宏任务只通知一次
+    _notifyKinds[kind] = true;
+    if (_notifyQueued) return;
+    _notifyQueued = true;
+    var flush = function () {
+        _notifyQueued = false;
+        var kinds = _notifyKinds;
+        _notifyKinds = {};
+        for (var i = 0; i < _dataSavedListeners.length; i++) {
+            try { _dataSavedListeners[i](kinds); } catch (e) {}
+        }
+    };
+    if (typeof setTimeout === 'function') setTimeout(flush, 0);
+    else flush();
 }
 
 // ══════════════════════════════════════════════════════════
@@ -925,6 +971,7 @@ export function savePartition(partKey, data) {
     delete pendingPartitionDeletes[partKey];
     idbPut(partKey, data);
     scheduleServerPutKey(partKey);
+    if (!_suppressDataNotify) notifyDataSaved('partition');
     return true;
 }
 
@@ -941,6 +988,13 @@ export function ensurePartition(partKey, cb) {
 // 删除 partition（角色删除时用）
 export function deletePartition(partKey) {
     if (serverInitFailed) return false;
+    // 衣柜被删了，它那批 base64 图片就没用了，顺手从图片缓存里清掉，别继续占内存
+    try {
+        var p = partCache[partKey] || loadPartition(partKey);
+        if (p && p.outfits) {
+            for (var i = 0; i < p.outfits.length; i++) dropResolvedImages(p.outfits[i] && p.outfits[i].id);
+        }
+    } catch (e) {}
     delete partCache[partKey];
     deletedPartKeys[partKey] = true;
     delete dirtyPartKeys[partKey];

@@ -14,7 +14,7 @@ import { registerSheetsFn, createSheet, closeSheet, getAllTagSuggestions } from 
 import { registerBatchFn, initBatchDeps } from './src/ui-batch.js';
 import { injectFab, updateBtn, injectBtn, registerFabFn } from './src/ui-fab.js';
 import { activateRecovery, deactivateRecovery, injectRecoveryBtn } from './src/ui-recovery.js';
-import { injectActiveBtn, refreshIfOpen } from './src/ui-active.js';
+import { injectActiveBtn } from './src/ui-active.js';
 import { setupMessageTags } from './src/msg-tag.js';
 
 // ── 注册跨模块函数 ─────────────────────────────────────
@@ -57,7 +57,7 @@ function startNormalUi() {
     setInterval(injectFab, 3000);
     setTimeout(injectActiveBtn, 400);
     setInterval(injectActiveBtn, 2500);
-    setInterval(refreshIfOpen, 1500);
+    // 浮窗刷新改由 db.onDataSaved 事件驱动（激活变更 / 刷新随机切片 / 设置开关），不再定时轮询
 
     // 正文穿搭标记 <Outfit-Manager-Custom>…</Outfit-Manager-Custom> → 卡片行
     setupMessageTags();

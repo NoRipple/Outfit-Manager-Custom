@@ -2,12 +2,12 @@
 // 魔法棒（扩展菜单）按钮 → 固定在左下角的窗口，列出正在注入的穿搭
 // 每张卡片显示：缩略图 + 角色名 + 穿搭名 + 标签
 
-import { loadMeta, loadActivePartitions, currentUserPartKey, charNameById } from './db.js';
+import { loadMeta, loadActivePartitions, charNameById, onDataSaved } from './db.js';
 import { SHARED_CHAR_KEY, partGetById, getOutfitThumb, getOutfitImages, getOutfitTags, garmentItemText } from './data.js';
 import { esc } from './utils.js';
 import { fn } from './bridge.js';
 import { getWorn } from './msg-tag.js';
-import { getLastInjected } from './inject.js';
+import { pickRandomSlice, getRandomInjectCount } from './inject.js';
 
 var WIN_ID = 'om-active-win';
 var BTN_ID = 'om-active-ext-btn';
@@ -31,35 +31,54 @@ function ownerLabel(partKey) {
     return '衣柜';
 }
 
-// 汇总当前真正参与注入的穿搭（与 inject.js 的读取逻辑保持一致）
+// 汇总当前真正参与注入的穿搭（与 inject.js 的读取逻辑 + 随机抽签规则保持一致）
+// 随机注入开启时：按「下一轮注入会抽到的」那几套来算，而不是全部激活项；
+// 抽签规则（每个衣柜各自抽 randomInjectCount 套、候选不足时全发）直接复用 inject.js 的纯函数。
+// 抽签是实时计算的，所以手动「刷新随机切片」后浮窗会跟着变；未开启随机注入 → 显示全部激活。
 var _sentFiltered = false;
+var _randLimited = false;   // 随机注入开启、且确实发生了「从更多套里抽几套」
+var _injectOff = false;     // 注入总开关关闭
+var _randEmpty = false;     // 随机注入开启，但一个可注入的衣柜都没有
+var _randCountForRender = 0;
 
 function collectActive() {
     var items = [];
     var parts = loadActivePartitions();
-    var curUserPK = currentUserPartKey();
+    _sentFiltered = false;
+    _randLimited = false;
+    _injectOff = false;
+    _randEmpty = false;
+    var partsEmptyOfOutfits = true;
+    var meta = null;
+    try { meta = loadMeta(); } catch (e) {}
+    var randomOn = !!(meta && meta.randomInject);
+    var injectOn = !(meta && meta.injectEnabled === false);   // 注入总开关关闭 → 什么都没进聊天
+    _injectOff = !injectOn;
+    var randCount = randomOn ? getRandomInjectCount(meta) : 0;
+    _randCountForRender = randCount;
     for (var pk in parts) {
         var part = parts[pk];
         var ids = (part && part.activeIds) || [];
+        var list = [];
         for (var i = 0; i < ids.length; i++) {
             var o = partGetById(part, ids[i]);
-            if (o) items.push({ owner: ownerLabel(pk), partKey: pk, outfit: o });
+            if (o) list.push({ owner: ownerLabel(pk), partKey: pk, outfit: o });
         }
-    }
-    // 随机注入开启时，浮窗只显示「本轮真正发出去」的那几套
-    _sentFiltered = false;
-    var meta = null;
-    try { meta = loadMeta(); } catch (e) {}
-    if (meta && meta.randomInject) {
-        var last = null;
-        try { last = getLastInjected(meta); } catch (e) {}
-        if (last && last.ids && last.ids.length) {
-            var keep = {};
-            for (var k = 0; k < last.ids.length; k++) keep[last.ids[k]] = 1;
-            var picked = items.filter(function (it) { return keep[it.outfit.id]; });
-            if (picked.length) { items = picked; _sentFiltered = true; }
+        if (!list.length) continue;
+        partsEmptyOfOutfits = false;
+        if (injectOn && randomOn) {
+            // 少于等于抽取数量时，注入本来就会全发，不算「随机截断」
+            if (list.length > randCount) {
+                list = pickRandomSlice(list, randCount);
+                _randLimited = true;
+            }
         }
+        for (var j = 0; j < list.length; j++) items.push(list[j]);
     }
+    _sentFiltered = _randLimited;
+    _randEmpty = randomOn && injectOn && partsEmptyOfOutfits;
+    // 注入总开关关闭时，没有任何穿搭会进入聊天 → 浮窗默认为空
+    if (!injectOn) return [];
     return items;
 }
 
@@ -84,8 +103,23 @@ function ensureWindow() {
         '<div class="om-act-body" id="om-act-body"></div>';
     document.body.appendChild(el);
     el.querySelector('#om-act-close').addEventListener('click', closeWindow);
+    // 「本楼穿着」会随 AI 回复变化，但激活 / 抽签没变，数据写入通知不会触发。
+    // 这里只在「浮窗开着」时比较一个小小的穿着签名（几套 id + 角色名，不做随机抽签、不碰 DOM），
+    // 变了才重绘；没变化时每 1.2 秒只做几次字符串比较。
+    _wornTimer = setInterval(function () {
+        try {
+            var w = getWorn();
+            var sig = '';
+            for (var k in w) sig += k + '@' + ((w[k] && w[k].owner) || '') + ';';
+            if (sig === _wornSig) return;
+            _wornSig = sig;
+            renderBody();
+        } catch (e) {}
+    }, 1200);
     return el;
 }
+var _wornSig = '';
+var _wornTimer = null;
 
 function wornOwnerSuffix(owner) {
     if (!owner || owner === _uniformOwner) return '';
@@ -182,9 +216,15 @@ function renderBody() {
     }
     _lastItems = items;
     _lastSig = items.map(function (it) { return it.outfit.id; }).join(',');
-    if (countEl) countEl.textContent = items.length ? (_sentFiltered ? '本轮 ' + items.length + ' 套' : '共 ' + items.length + ' 套') : '';
+    if (countEl) countEl.textContent = items.length
+        ? (_sentFiltered ? '本轮 ' + items.length + ' 套（随机抽 ' + _randCountForRender + '）' : '共 ' + items.length + ' 套')
+        : '';
     if (!items.length) {
-        body.innerHTML = '<div class="om-act-empty">当前没有生效的穿搭。<br><span>在衣柜里激活几套后再来看看。</span></div>';
+        var tip;
+        if (_injectOff) tip = '注入总开关已关闭，穿搭不会进入聊天。';
+        else if (_randEmpty) tip = '随机注入已开启，但当前没有可注入的激活穿搭。';
+        else tip = '在衣柜里激活几套后再来看看。';
+        body.innerHTML = '<div class="om-act-empty">当前没有生效的穿搭。<br><span>' + esc(tip) + '</span></div>';
         return;
     }
     var _h = cardHeight();
@@ -232,6 +272,10 @@ window.addEventListener('resize', function () { if (isWinOpen()) fitToChat(); })
 function closeWindow() {
     var el = document.getElementById(WIN_ID);
     if (el && el.parentNode) el.parentNode.removeChild(el);
+    // 窗口关掉就停掉「本楼穿着」打点，不让它在后台空转
+    if (_wornTimer) { clearInterval(_wornTimer); _wornTimer = null; }
+    _lastItems = [];
+    _lastSig = '';
 }
 
 function toggleWindow() {
@@ -240,6 +284,8 @@ function toggleWindow() {
 }
 
 // 窗口打开时，如果换了角色 / 改了激活，自动刷新
+// 事件驱动：由 db.js 的 onDataSaved 通知（不再定时轮询，避免反复重算随机切片）
+// 先算签名（只比对 id 列表），确实变了才重画 DOM。
 function refreshIfOpen() {
     if (!isWinOpen()) return;
     var sig = collectActive().map(function (it) { return it.outfit.id; }).join(',');
@@ -256,6 +302,12 @@ function refreshActiveWindow() {
 
 // msg-tag.js 通过 fn.refreshActiveWindow() 通知刷新
 fn.refreshActiveWindow = refreshActiveWindow;
+
+// 数据写入（激活变更 / 刷新随机切片 / 设置开关 / 切角色）→ 浮窗打开时才重算
+// 不注册定时器：没有这些动作时零开销。
+try {
+    onDataSaved(function () { refreshIfOpen(); });
+} catch (e) {}
 
 // ── 魔法棒菜单按钮 ───────────────────────────────────────
 function findMenu() {
@@ -283,3 +335,7 @@ function injectActiveBtn() {
 }
 
 export { toggleWindow, openWindow, closeWindow, injectActiveBtn, refreshIfOpen, refreshActiveWindow };
+
+// 仅测试用入口（生产代码不调用）
+export function __testCollectActive() { return collectActive(); }
+export function __testState() { return { sentFiltered: _sentFiltered, randLimited: _randLimited, injectOff: _injectOff, randEmpty: _randEmpty }; }

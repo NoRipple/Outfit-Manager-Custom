@@ -118,7 +118,14 @@ async function run() {
             return new vm.SyntheticModule(['toast'], function () { this.setExport('toast', () => {}); }, { context });
         }
         if (specifier === './bridge.js') {
-            return new vm.SyntheticModule(['state', 'fn'], function () { this.setExport('state', { resolvedImages: {} }); this.setExport('fn', {}); }, { context });
+            return new vm.SyntheticModule(['state', 'fn', 'putResolvedImages', 'getResolvedImages', 'dropResolvedImages'], function () {
+                var st = { resolvedImages: {} };
+                this.setExport('state', st);
+                this.setExport('fn', {});
+                this.setExport('putResolvedImages', (id, e) => { st.resolvedImages[id] = e; });
+                this.setExport('getResolvedImages', (id) => st.resolvedImages[id]);
+                this.setExport('dropResolvedImages', (id) => { delete st.resolvedImages[id]; });
+            }, { context });
         }
         throw new Error('Unexpected import: ' + specifier);
     });

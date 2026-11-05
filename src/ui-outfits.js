@@ -21,7 +21,7 @@ import {
 } from './data.js';
 import { esc, toast, getPopupLayer, uniqueIds } from './utils.js';
 import { batchClassifyOutfits, batchGenerateTags } from './api.js';
-import { state, fn } from './bridge.js';
+import { state, fn, putResolvedImages, getResolvedImages } from './bridge.js';
 
 var detailPanelOpen = false;
 var gridImageObserver = null;
@@ -60,7 +60,7 @@ export function preResolveActiveImages() {
             var imgs = getOutfitImages(o);
             if (!imgs.length) return;
             // 已解析且原始 URL 未变则跳过
-            var cached = state.resolvedImages[o.id];
+            var cached = getResolvedImages(o.id);
             if (cached && cached.urls && cached.urls.length === imgs.length) {
                 var same = true;
                 for (var i = 0; i < imgs.length; i++) {
@@ -78,14 +78,14 @@ export function preResolveActiveImages() {
                         resolveImageForExternal(u, function (dataUrl) {
                             resolved[idx] = dataUrl;
                             pending--;
-                            if (pending === 0) state.resolvedImages[o.id] = { urls: imgs.slice(), dataUrls: resolved.slice() };
+                            if (pending === 0) putResolvedImages(o.id, { urls: imgs.slice(), dataUrls: resolved.slice() });
                         });
                     })(i);
                 } else {
                     resolved[i] = u;
                 }
             });
-            if (pending === 0) state.resolvedImages[o.id] = { urls: imgs.slice(), dataUrls: resolved.slice() };
+            if (pending === 0) putResolvedImages(o.id, { urls: imgs.slice(), dataUrls: resolved.slice() });
         });
     }
 
